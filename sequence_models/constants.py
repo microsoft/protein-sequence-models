@@ -13,6 +13,7 @@ NAS = 'GATUC' + EXTENDED_NA
 
 STOP = '*'
 GAP = '-'
+PAD = GAP
 MASK = '#'  # Useful for masked language model training
 START = '@'
 
