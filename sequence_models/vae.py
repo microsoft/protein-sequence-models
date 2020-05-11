@@ -1,7 +1,149 @@
-from typing import Iterable, List
+from typing import List
 
 import torch.nn as nn
 import torch
+import torch.optim as optim
+from apex import amp
+import mlflow
+
+from sequence_models.losses import VAELoss
+from sequence_models.layers import FCStack
+from sequence_models.metrics import UngappedAccuracy
+
+
+class VAETrainer(object):
+    """ Trainer for VAEs."""
+    def __init__(self, vae, device, class_weights=None, lr=1e-4, beta=1.0, opt_level='O2', optim_kwargs={},
+                 early_stopping=True, patience=10, improve_threshold=0.001, save_freq=100, scheduler=None,
+                 scheduler_args=[], scheduler_kwargs={}, scheduler_time='epoch'):
+        self.vae = vae.to(device)
+        self.device = device
+        self.beta = beta
+        # Store an optimizer
+        self.optimizer = optim.Adam(vae.parameters(), lr=lr, **optim_kwargs)
+        if opt_level != 'O0':
+            self.vae, self.optimizer = amp.initialize(self.vae, self.optimizer, opt_level=opt_level)
+        self.opt_level = opt_level
+        # Store the loss
+        self.loss_func = VAELoss(class_weights=class_weights)
+        self.accu_func = UngappedAccuracy()
+        if scheduler is None:
+            self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, 1, gamma=1.0)
+            self.scheduler_time = 'epoch'
+        else:
+            self.scheduler = scheduler(self.optimizer, *scheduler_args, **scheduler_kwargs)
+            self.scheduler_time = scheduler_time
+        self.early_stopping = early_stopping
+        self.patience = patience
+        self.improve_threshold = improve_threshold
+        self.save_freq = save_freq
+
+    def step(self, src, train=True, weights=None):
+        """Do a forward pass. Do a backward pass if train=True. """
+        if train:
+            self.vae = self.vae.train()
+            self.optimizer.zero_grad()
+        else:
+            self.vae = self.vae.eval()
+        loss, r_loss, kl_loss, accu = self._forward(src, weights=weights)
+        if train:
+            self._backward(loss)
+        return loss.item(), r_loss.item(), kl_loss.item(), accu.item()
+
+    def _forward(self, src, weights=None):
+        src = src.to(self.device)
+        p, z_mu, z_log_var = self.vae(src)
+        loss, r_loss, kl_loss = self.loss_func(p, src, z_mu, z_log_var, alpha=self.beta, weights=weights)
+        accu = self.accu_func(p, src)
+        return loss, r_loss, kl_loss, accu
+
+    def _backward(self, loss):
+        if self.opt_level != 'O0':
+            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
+        self.optimizer.step()
+        if self.scheduler_time == 'batch':
+            self.scheduler.step()
+
+    def epoch(self, loader, train):
+        losses = 0.0
+        r_losses = 0.0
+        kl_losses = 0.0
+        accus = 0.0
+        for i, batch in enumerate(loader):
+            src = batch[0]
+            if len(batch) == 2:
+                weights = batch[1]
+            else:
+                weights = None
+            loss, r_loss, kl_loss, accu = self.step(src, train=train, weights=weights)
+            losses += loss
+            r_losses += r_loss
+            kl_losses += kl_loss
+            accus += accu
+            mean_loss = losses / (i + 1)
+            mean_r = r_losses / (i + 1)
+            mean_kl = kl_losses / (i + 1)
+            mean_accu = accus / (i + 1)
+            print(
+                '\rBatch %d of %d loss = %.4f r = %.4f kld = %.4f accu = %.4f' % (i + 1,
+                                                                                  len(loader),
+                                                                                  mean_loss,
+                                                                                  mean_r,
+                                                                                  mean_kl,
+                                                                                  mean_accu),
+                  end=''
+            )
+        print()
+        return mean_loss, mean_r, mean_kl, mean_accu
+
+    def train(self, train_loader, epochs, valid_loader=None, save_path=None):
+        done = False
+        stagnant = 0
+        best_loss = 1e8
+        for epoch in range(epochs):
+            if epoch > 0 and (epoch % self.save_freq == 0) and save_path is not None:
+                torch.save(self.vae.state_dict(), save_path + 'autosave_epoch_{}.pkl'.format(epoch))
+                torch.save(self.optimizer.state_dict(), save_path + 'optim_autosave_epoch_{}.pkl'.format(epoch))
+            if not done:
+                print('Epoch %d of %d' % (epoch + 1, epochs))
+                loss, r_loss, kld, accu = self.epoch(train_loader, True)
+                mlflow.log_metrics(
+                    {
+                        'train_loss': loss,
+                        'train_r_loss': r_loss,
+                        'train_kld': kld,
+                        'train_accu': accu
+                    }
+                )
+
+                if valid_loader is not None:
+                    with torch.no_grad():
+                        loss, r_loss, kld, accu = self.epoch(valid_loader, False)
+                    if self.scheduler_time == 'epoch':
+                        self.scheduler.step(loss)
+                    mlflow.log_metrics(
+                        {
+                            'valid_loss': loss,
+                            'valid_r_loss': r_loss,
+                            'valid_kld': kld,
+                            'valid_accu': accu
+                        }
+                    )
+                    if self.early_stopping:
+                        improve = loss <= (1 - self.improve_threshold) * best_loss
+                        best_loss = min(self.history['valid']['loss'])
+                        if not improve:
+                            stagnant += 1
+                        else:
+                            stagnant = 0
+                        done = stagnant >= self.patience
+            else:
+                print('Stopping early at epoch {}'.format(epoch))
+                break
+        return self.vae, self.loss_func, self.optimizer
 
 
 class VAE(nn.Module):
@@ -42,35 +184,6 @@ class VAE(nn.Module):
         mu, log_var = self.encode(x)
         z = self.reparameterize(mu, log_var)
         return self.decode(z), mu, log_var
-
-
-class FCStack(nn.Module):
-    """A stack of fully-connected layers.
-
-     Every nn.Linear is optionally followed by  a normalization layer,
-     a dropout layer, and then a ReLU.
-
-     Args:
-         sizes (List of ints): the all layer dimensions from input to output
-         norm (str): type of norm. 'bn' for batchnorm, 'ln' for layer norm. Default 'bn'
-         p (float): dropout probability
-
-     Input (N, sizes[0])
-     Output (N, sizes[-1])
-     """
-
-    def __init__(self, sizes: List[int], norm='bn', p=0.0):
-        layers = []
-        for d0, d1 in zip(sizes, sizes[1:]):
-            layers.append(nn.Linear(d0, d1))
-            if norm == 'ln':
-                layers.append(nn.LayerNorm(d0))
-            elif norm == 'bn':
-                layers.append(nn.BatchNorm1d(d0))
-            if p != 0:
-                layers.append(nn.Dropout(p))
-            layers.append(nn.ReLU(inplace=True))
-        self.layers = nn.Sequential(*layers)
 
 
 class FCEncoder(nn.Module):
