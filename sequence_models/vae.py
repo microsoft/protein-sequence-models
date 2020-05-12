@@ -116,7 +116,8 @@ class VAETrainer(object):
                         'train_r_loss': r_loss,
                         'train_kld': kld,
                         'train_accu': accu
-                    }
+                    },
+                    step=epoch
                 )
 
                 if valid_loader is not None:
@@ -130,7 +131,8 @@ class VAETrainer(object):
                             'valid_r_loss': r_loss,
                             'valid_kld': kld,
                             'valid_accu': accu
-                        }
+                        },
+                        step=epoch
                     )
                     if self.early_stopping:
                         improve = loss <= (1 - self.improve_threshold) * best_loss
