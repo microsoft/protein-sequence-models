@@ -13,7 +13,7 @@ from sequence_models.metrics import UngappedAccuracy
 
 class VAETrainer(object):
     """ Trainer for VAEs."""
-    def __init__(self, vae, device, class_weights=None, lr=1e-4, beta=1.0, opt_level='O2', optim_kwargs={},
+    def __init__(self, vae, device, pad_idx, class_weights=None, lr=1e-4, beta=1.0, opt_level='O2', optim_kwargs={},
                  early_stopping=True, patience=10, improve_threshold=0.001, save_freq=100, scheduler=None,
                  scheduler_args=[], scheduler_kwargs={}, scheduler_time='epoch'):
         self.vae = vae.to(device)
@@ -26,7 +26,7 @@ class VAETrainer(object):
         self.opt_level = opt_level
         # Store the loss
         self.loss_func = VAELoss(class_weights=class_weights)
-        self.accu_func = UngappedAccuracy()
+        self.accu_func = UngappedAccuracy(pad_idx)
         if scheduler is None:
             self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, 1, gamma=1.0)
             self.scheduler_time = 'epoch'
@@ -53,7 +53,7 @@ class VAETrainer(object):
     def _forward(self, src, weights=None):
         src = src.to(self.device)
         p, z_mu, z_log_var = self.vae(src)
-        loss, r_loss, kl_loss = self.loss_func(p, src, z_mu, z_log_var, alpha=self.beta, weights=weights)
+        loss, r_loss, kl_loss = self.loss_func(p, src, z_mu, z_log_var, beta=self.beta, sample_weights=weights)
         accu = self.accu_func(p, src)
         return loss, r_loss, kl_loss, accu
 
@@ -134,11 +134,11 @@ class VAETrainer(object):
                     )
                     if self.early_stopping:
                         improve = loss <= (1 - self.improve_threshold) * best_loss
-                        best_loss = min(self.history['valid']['loss'])
                         if not improve:
                             stagnant += 1
                         else:
                             stagnant = 0
+                            best_loss = loss
                         done = stagnant >= self.patience
             else:
                 print('Stopping early at epoch {}'.format(epoch))

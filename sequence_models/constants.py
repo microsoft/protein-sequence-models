@@ -1,5 +1,5 @@
 #  It's helpful to separate out the twenty canonical amino acids from the rest
-CAN_AAS = 'ACDEFGHIKLMNPQRSTVW'
+CAN_AAS = 'ACDEFGHIKLMNPQRSTVWY'
 AMB_AAS = 'BZX'
 OTHER_AAS = 'JOU'
 ALL_AAS = CAN_AAS + AMB_AAS + OTHER_AAS

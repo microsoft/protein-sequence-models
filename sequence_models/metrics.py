@@ -32,8 +32,8 @@ class MaskedAccuracy(object):
 
     def __call__(self, pred, tgt, mask):
         _, p = torch.max(pred, -1)
-        masked_tgt = torch.masked_select(tgt, mask.byte())
-        p = torch.masked_select(p, mask.byte())
+        masked_tgt = torch.masked_select(tgt, mask.bool())
+        p = torch.masked_select(p, mask.bool())
         return torch.mean((p == masked_tgt).float())
 
 
