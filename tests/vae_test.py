@@ -80,14 +80,14 @@ def test_loss():
     vloss = VAELoss(class_weights=None)
     # With reduction
     loss, r, k = vloss(p, src, mu, logvar, beta=beta)
-    assert torch.allclose(r_loss.mean(dim=1).mean(dim=0) + beta * kl_loss.mean(dim=1).mean(dim=0), loss)
-    assert torch.allclose(r, r_loss.mean(dim=1).mean())
-    assert torch.allclose(k, kl_loss.mean(dim=1).mean())
+    assert torch.allclose(r_loss.sum(dim=1).mean(dim=0) + beta * kl_loss.sum(dim=1).mean(dim=0), loss)
+    assert torch.allclose(r, r_loss.sum(dim=1).mean())
+    assert torch.allclose(k, kl_loss.sum(dim=1).mean())
     # Without reduction
     loss, r, k = vloss(p, src, mu, logvar, beta=beta, reduction='none')
-    assert torch.allclose(r_loss.mean(dim=1) + beta * kl_loss.mean(dim=1), loss)
-    assert torch.allclose(r, r_loss.mean(dim=1))
-    assert torch.allclose(k, kl_loss.mean(dim=1))
+    assert torch.allclose(r_loss.sum(dim=1) + beta * kl_loss.sum(dim=1), loss)
+    assert torch.allclose(r, r_loss.sum(dim=1))
+    assert torch.allclose(k, kl_loss.sum(dim=1))
 
     # With class_weights and sample_weights
     cw = torch.rand(3)
@@ -100,11 +100,11 @@ def test_loss():
     vloss = VAELoss(class_weights=cw)
     # With reduction
     loss, r, k = vloss(p, src, mu, logvar, beta=beta, sample_weights=sw)
-    assert torch.allclose(r_loss.mean() + beta * kl_loss.mean(dim=1).mean(dim=0), loss)
+    assert torch.allclose(r_loss.mean() + beta * kl_loss.sum(dim=1).mean(dim=0), loss)
     assert torch.allclose(r, r_loss.mean())
-    assert torch.allclose(k, kl_loss.mean(dim=1).mean())
+    assert torch.allclose(k, kl_loss.sum(dim=1).mean())
     # Without reduction
     loss, r, k = vloss(p, src, mu, logvar, beta=beta, sample_weights=sw, reduction='none')
-    assert torch.allclose(r_loss + beta * kl_loss.mean(dim=1), loss)
+    assert torch.allclose(r_loss + beta * kl_loss.sum(dim=1), loss)
     assert torch.allclose(r, r_loss)
-    assert torch.allclose(k, kl_loss.mean(dim=1))
+    assert torch.allclose(k, kl_loss.sum(dim=1))

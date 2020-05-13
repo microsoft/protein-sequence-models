@@ -71,8 +71,8 @@ class VAELoss(nn.Module):
         kld = -0.5 * (1 + log_var - mu ** 2 - log_var.exp())
         r_loss = self.recon_loss(pre, tgt, reduction='none')
         if sample_weights is None:
-            kld = kld.mean(dim=1)
-            r_loss = r_loss.mean(dim=1)
+            kld = kld.sum(dim=1)
+            r_loss = r_loss.sum(dim=1)
         else:
             kld = (kld * sample_weights).mean(dim=1)
             r_loss *= sample_weights
