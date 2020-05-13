@@ -150,7 +150,7 @@ class VAETrainer(object):
                         },
                         step=self.current_epoch
                     )
-                    if self.early_stopping:
+                    if self.early_stopping and self.current_epoch > self.anneal_epochs:
                         improve = loss <= (1 - self.improve_threshold) * best_loss
                         if not improve:
                             stagnant += 1
