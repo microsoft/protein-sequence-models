@@ -15,10 +15,11 @@ class VAETrainer(object):
     """ Trainer for VAEs."""
     def __init__(self, vae, device, pad_idx, class_weights=None, lr=1e-4, beta=1.0, opt_level='O2', optim_kwargs={},
                  early_stopping=True, patience=10, improve_threshold=0.001, save_freq=100, scheduler=None,
-                 scheduler_args=[], scheduler_kwargs={}, scheduler_time='epoch'):
+                 scheduler_args=[], scheduler_kwargs={}, scheduler_time='epoch', kl_anneal=-1):
         self.vae = vae.to(device)
         self.device = device
         self.beta = beta
+        self.anneal_epochs = kl_anneal
         # Store an optimizer
         self.optimizer = optim.Adam(vae.parameters(), lr=lr, **optim_kwargs)
         if opt_level != 'O0':
@@ -37,6 +38,7 @@ class VAETrainer(object):
         self.patience = patience
         self.improve_threshold = improve_threshold
         self.save_freq = save_freq
+        self.current_epoch = 0
 
     def step(self, src, train=True, weights=None):
         """Do a forward pass. Do a backward pass if train=True. """
@@ -53,7 +55,11 @@ class VAETrainer(object):
     def _forward(self, src, weights=None):
         src = src.to(self.device)
         p, z_mu, z_log_var = self.vae(src)
-        loss, r_loss, kl_loss = self.loss_func(p, src, z_mu, z_log_var, beta=self.beta, sample_weights=weights)
+        if self.anneal_epochs == -1:
+            beta = self.beta
+        else:
+            beta = self.beta * min(self.current_epoch / self.anneal_epochs, 1.0)
+        loss, r_loss, kl_loss = self.loss_func(p, src, z_mu, z_log_var, beta=beta, sample_weights=weights)
         accu = self.accu_func(p, src)
         return loss, r_loss, kl_loss, accu
 
@@ -87,13 +93,22 @@ class VAETrainer(object):
             mean_r = r_losses / (i + 1)
             mean_kl = kl_losses / (i + 1)
             mean_accu = accus / (i + 1)
+            if train:
+                print('\rTraining ', end='')
+            else:
+                print('\rValidating ', end='')
             print(
-                '\rBatch %d of %d loss = %.4f r = %.4f kld = %.4f accu = %.4f' % (i + 1,
-                                                                                  len(loader),
-                                                                                  mean_loss,
-                                                                                  mean_r,
-                                                                                  mean_kl,
-                                                                                  mean_accu),
+                'Epoch %d of %d Batch %d of %d loss = %.4f r = %.4f kld = %.4f accu = %.4f'
+                % (
+                    self.current_epoch + 1,
+                    self.total_epochs,
+                    i + 1,
+                    len(loader),
+                    mean_loss,
+                    mean_r,
+                    mean_kl,
+                    mean_accu
+                ),
                   end=''
             )
         print()
@@ -103,12 +118,13 @@ class VAETrainer(object):
         done = False
         stagnant = 0
         best_loss = 1e8
+        self.total_epochs = epochs
         for epoch in range(epochs):
+            self.current_epoch = epoch
             if epoch > 0 and (epoch % self.save_freq == 0) and save_path is not None:
                 torch.save(self.vae.state_dict(), save_path + 'autosave_epoch_{}.pkl'.format(epoch))
                 torch.save(self.optimizer.state_dict(), save_path + 'optim_autosave_epoch_{}.pkl'.format(epoch))
             if not done:
-                print('Epoch %d of %d' % (epoch + 1, epochs))
                 loss, r_loss, kld, accu = self.epoch(train_loader, True)
                 mlflow.log_metrics(
                     {
@@ -117,7 +133,7 @@ class VAETrainer(object):
                         'train_kld': kld,
                         'train_accu': accu
                     },
-                    step=epoch
+                    step=self.current_epoch
                 )
 
                 if valid_loader is not None:
@@ -132,7 +148,7 @@ class VAETrainer(object):
                             'valid_kld': kld,
                             'valid_accu': accu
                         },
-                        step=epoch
+                        step=self.current_epoch
                     )
                     if self.early_stopping:
                         improve = loss <= (1 - self.improve_threshold) * best_loss
@@ -143,7 +159,7 @@ class VAETrainer(object):
                             best_loss = loss
                         done = stagnant >= self.patience
             else:
-                print('Stopping early at epoch {}'.format(epoch))
+                print('Stopping early at epoch {}'.format(self.current_epoch))
                 break
         return self.vae, self.loss_func, self.optimizer
 
