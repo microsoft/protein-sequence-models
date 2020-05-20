@@ -1,6 +1,10 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+import numpy as np
+
+
+from sequence_models.layers import PositionFeedForward
 
 
 class MaskedConv1d(nn.Conv1d):
@@ -143,3 +147,55 @@ class MaskedCausalConv1d(nn.Module):
                                dilation=self.dilation, groups=self.groups)
 
         return activations
+
+
+class ByteNetBlock(nn.Module):
+    """Residual block from ByteNet paper (https://arxiv.org/abs/1610.10099)."""
+
+    def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1, causal=False):
+        super().__init__()
+        if causal:
+            self.conv = MaskedCausalConv1d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
+        else:
+            self.conv = MaskedConv1d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
+        layers1 = [
+            nn.LayerNorm(d_in),
+            nn.ReLU(),
+            PositionFeedForward(d_in, d_h),
+            nn.LayerNorm(d_h),
+            nn.ReLU()
+            ]
+        layers2 = [
+            nn.LayerNorm(d_h),
+            nn.ReLU(),
+            PositionFeedForward(d_h, d_out),
+            ]
+        self.sequence1 = nn.Sequential(*layers1)
+        self.sequence2 = nn.Sequential(*layers2)
+
+    def forward(self, x, input_mask=None):
+        return x + self.sequence2(
+            self.conv(self.sequence1(x), input_mask=input_mask)
+        )
+
+
+class ByteNet(nn.Module):
+
+    def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r, padding_idx=None, causal=False):
+        super().__init__()
+        self.embedder = nn.Embedding(n_tokens, d_embedding, padding_idx=padding_idx)
+        self.up_embedder = PositionFeedForward(d_embedding, d_model)
+        log2 = int(np.log2(r)) + 1
+        dilations = [2 ** (n % log2) for n in range(n_layers)]
+        layers = [
+            ByteNetBlock(d_model, d_model // 2, d_model, kernel_size, dilation=d, causal=causal)
+            for d in dilations
+        ]
+        self.layers = nn.ModuleList(modules=layers)
+
+    def forward(self, x, input_mask=None):
+        e = self.embedder(x)
+        e = self.up_embedder(e)
+        for layer in self.layers:
+            e = layer(e, input_mask=input_mask)
+        return e
