@@ -14,6 +14,22 @@ from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD
 
 
+import pandas as pd
+import numpy as np
+import math
+
+from torch.utils.data import Dataset, DataLoader
+import torch
+from torch.utils.data.sampler import SequentialSampler, RandomSampler, Sampler, \
+	BatchSampler, SubsetRandomSampler
+
+from torchnlp.samplers.sorted_sampler import SortedSampler
+from torchnlp.utils import identity
+
+from utils import Tokenizer
+from constants import PAD
+
+
 def pad(seq, pad_token, max_length):
 	padded = seq + pad_token * (max_length-len(seq))
 	return padded
@@ -35,9 +51,31 @@ class CSVDataset(Dataset):
 		row = self.data.loc[idx]
 		padded = pad(row['sequences'], self.pad_token, padlen)
 		return self.tokenizer.tokenize(padded)
+    
 
+class BucketSampler(Sampler):
 
-class BucketBatchSampler(BatchSampler):
+    def __init__(self, sequence_lengths, bucket_size, sort_key=identity):
+        self.data = sequence_lengths
+        self.bucket_size = bucket_size
+        self.sort_key = sort_key
+        zip_ = [(i, self.sort_key(row)) for i, row in enumerate(self.data)]
+        zip_ = sorted(zip_, key=lambda r: r[1])
+        self.sorted_indexes = [item[0] for item in zip_]
+        
+    def __iter__(self):
+        bucket = []
+        for idx in self.sorted_indexes:
+            bucket.append(idx)
+            if len(bucket) == self.bucket_size:
+                yield bucket
+                bucket = []
+        if len(bucket) > 0:
+            yield bucket    
+    def __len__(self):
+        return len(self.data)
+
+class ApproxBatchSampler(BatchSampler):
 	'''
 	Parameters:
 	-----------
@@ -53,36 +91,23 @@ class BucketBatchSampler(BatchSampler):
 	drop_last : bool
 		If `True` the sampler will drop the last batch if its 
 		size would be less than `batch_size`.
-
-	sort_key : callable
-		Callable to specify a comparison key for sorting
-
-	bucket_size : int 
-		Size of buckets to divide data into
 	'''
 
 	def __init__(self, sampler, approx_token, sample_lengths,
-				 drop_last, sort_key=identity, bucket_size=100):
-		super().__init__(sampler, 1, drop_last)
-		self.batch_size = 1
+				 drop_last = False):
 		self.longest_token = 0
 		self.approx_token = approx_token
 		self.sample_lengths = sample_lengths
-		self.sort_key = sort_key
-		self.bucket_sampler = BatchSampler(sampler,
-										   min(bucket_size, len(sampler)),
-										   False)
-		
+		self.sampler = sampler
 
 	def __iter__(self):
-		for bucket in self.bucket_sampler:
-			sorted_sampler = SortedSampler(bucket, self.sort_key)
-			for mini_batch in SubsetRandomSampler(
-					list(BatchSampler(sorted_sampler, 1,self.drop_last))):
+		for bucket_idx in RandomSampler(list(self.sampler)): # get random bucket
+			bucket = list(self.sampler)[bucket_idx]
+			for single_sample in SubsetRandomSampler(bucket): # get random sample in bucket
 				if self.longest_token == 0:
 					batch = []
-				batch.append(bucket[mini_batch[0]])
-				self.longest_token = max(self.longest_token, self.sample_lengths[bucket[mini_batch[0]]])
+				batch.append(single_sample) # fill batch until approx_token is met
+				self.longest_token = max(self.longest_token, self.sample_lengths[single_sample])
 				if self.longest_token * len(batch) >= self.approx_token:
 					yield_batch = [(i, self.longest_token) for i in batch]
 					self.longest_token = 0
@@ -95,26 +120,21 @@ class BucketBatchSampler(BatchSampler):
 			return math.ceil(len(self.sampler) / self.batch_size)
 
 
+"""
+# Example
 
-'''
-Example:
---------
-
-# load dataset into CSVDataset
+# load Dataset 
 dataset = CSVDataset('UniLanguage/data/arc_frag_exp/train.csv', PROTEIN_ALPHABET, '-')
 
 # extract sequence lengths
 data_df = pd.read_csv('UniLanguage/data/arc_frag_exp/train.csv')
 sequence_lengths = [len(i) for i in data_df.sequences]
 
-# set up batch sampler - as of right now with base_sampler = SequentialSampler, 
-# bucketing will bucket the dataset according to order of dataset and then select batches with similar
-# length sequences within buckets. If we want bucketing according to size,
-# simply order csv file before passing through CSVDataset and SequentialSampler
+# build bucket_sampler
+bucket_sampler = BucketSampler(sequence_lengths, 100)
 
-base_sampler = SequentialSampler(dataset)
-batch_sampler = BucketBatchSampler(base_sampler, approx_token=1000, sample_lengths=sequence_lengths, 
-                             bucket_size=100, drop_last=False)
+# build batch_sampler
+batch_sampler = ApproxBatchSampler(bucket_sampler, approx_token=1000, sample_lengths= sequence_lengths)
 
 # build dataloader
 dataloader = DataLoader(dataset=dataset, shuffle=False, sampler=None,
@@ -122,4 +142,4 @@ dataloader = DataLoader(dataset=dataset, shuffle=False, sampler=None,
                pin_memory=False, drop_last=False, timeout=0,
                worker_init_fn=None)
 
-'''
+"""
