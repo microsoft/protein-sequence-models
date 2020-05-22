@@ -107,7 +107,11 @@ dataset = CSVDataset('UniLanguage/data/arc_frag_exp/train.csv', PROTEIN_ALPHABET
 data_df = pd.read_csv('UniLanguage/data/arc_frag_exp/train.csv')
 sequence_lengths = [len(i) for i in data_df.sequences]
 
-# set up batch sampler
+# set up batch sampler - as of right now with base_sampler = SequentialSampler, 
+# bucketing will bucket the dataset according to order of dataset and then select batches with similar
+# length sequences within buckets. If we want bucketing according to size,
+# simply order csv file before passing through CSVDataset and SequentialSampler
+
 base_sampler = SequentialSampler(dataset)
 batch_sampler = BucketBatchSampler(base_sampler, approx_token=1000, sample_lengths=sequence_lengths, 
                              bucket_size=100, drop_last=False)
