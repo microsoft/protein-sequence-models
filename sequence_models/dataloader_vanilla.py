@@ -26,8 +26,8 @@ from torch.utils.data.sampler import SequentialSampler, RandomSampler, Sampler, 
 from torchnlp.samplers.sorted_sampler import SortedSampler
 from torchnlp.utils import identity
 
-from utils import Tokenizer
-from constants import PAD
+from sequence_models.utils import Tokenizer
+from sequence_models.constants import PAD
 
 
 def pad(seq, pad_token, max_length):
@@ -93,33 +93,29 @@ class ApproxBatchSampler(BatchSampler):
 		size would be less than `batch_size`.
 	'''
 
-	def __init__(self, sampler, approx_token, sample_lengths,
-				 drop_last = False):
+	def __init__(self, sampler, approx_token, sample_lengths,):
 		self.longest_token = 0
 		self.approx_token = approx_token
 		self.sample_lengths = sample_lengths
 		self.sampler = sampler
+		self.batch = []
 
 	def __iter__(self):
 		for bucket_idx in RandomSampler(list(self.sampler)): # get random bucket
 			bucket = list(self.sampler)[bucket_idx]
+			self.batch = []
 			for single_sample in SubsetRandomSampler(bucket): # get random sample in bucket
 				if self.longest_token == 0:
-					batch = []
-				batch.append(single_sample) # fill batch until approx_token is met
+					self.batch = []
+				self.batch.append(single_sample) # fill batch until approx_token is met
 				self.longest_token = max(self.longest_token, self.sample_lengths[single_sample])
-				if self.longest_token * len(batch) >= self.approx_token:
-					yield_batch = [(i, self.longest_token) for i in batch]
+				if self.longest_token * len(self.batch) >= self.approx_token:
+					yield_batch = [(i, self.longest_token) for i in self.batch]
 					self.longest_token = 0
 					yield yield_batch
 	
 	def __len__(self):
-		if self.drop_last:
-			return len(self.sampler) // self.batch_size
-		else:
-			return math.ceil(len(self.sampler) / self.batch_size)
-
-
+		return len(self.sampler)
 """
 # Example
 
