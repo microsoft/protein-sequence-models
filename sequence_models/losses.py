@@ -16,7 +16,7 @@ class SequenceCrossEntropyLoss(nn.Module):
                                ignore_index=self.ignore_index)
 
 
-class MaskedCrossEntropyLoss(nn.Module):
+class MaskedCrossEntropyLoss(nn.CrossEntropyLoss):
     """Masked cross-entropy loss for sequences.
 
     Evaluates the cross-entropy loss at specified locations in a sequence.
@@ -25,20 +25,24 @@ class MaskedCrossEntropyLoss(nn.Module):
         Inputs:
             - pred: (N, L, n_tokens)
             - tgt: (N, L)
-            - mask: (N, L)
+            - mask: (N, L) boolean
             - weight: (C, ): class weights for nn.CrossEntropyLoss
     """
 
-    def __init__(self, weight=None):
-        super(MaskedCrossEntropyLoss, self).__init__()
-        self.cel = nn.CrossEntropyLoss(weight=weight, reduction='none')
+    def __init__(self, weight=None, reduction='mean'):
+        super().__init__(weight=weight, reduction=reduction)
 
     def forward(self, pred, tgt, mask):
-        _, _, n_tokens = pred.size()
-        mask = mask.float()
-        loss = self.cel(pred.contiguous().view(-1, n_tokens), tgt.contiguous().view(-1))
-        loss = (mask.view(-1) * loss).sum() / mask.sum()
-        return loss
+        # Make sure we have that empty last dimension
+        mask = mask.view(*mask.shape[:2], 1)
+        # Make sure mask is boolean
+        mask = mask.bool()
+        # Number of locations to calculate loss
+        n = mask.sum()
+        # Select
+        p = torch.masked_select(pred, mask).view(n, -1)
+        t = torch.masked_select(tgt, mask.squeeze())
+        return super().forward(p, t)
 
 
 class VAELoss(nn.Module):

@@ -3,6 +3,16 @@ from typing import List
 import torch.nn as nn
 
 
+class PositionFeedForward(nn.Module):
+
+    def __init__(self, d_in, d_out):
+        super().__init__()
+        self.conv = nn.Conv1d(d_in, d_out, 1)
+
+    def forward(self, x):
+        return self.conv(x.transpose(1, 2)).transpose(1, 2)
+
+
 class FCStack(nn.Sequential):
     """A stack of fully-connected layers.
 
