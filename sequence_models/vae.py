@@ -271,39 +271,29 @@ class FCDecoder(nn.Module):
         return x.view(n, self.L, self.d_in)
 
 
-class HierarchicalCNNDecoder(nn.Module):
-    """ A hierarchical decoder using causal convolutions.
+class HierarchicalRecurrentDecoder(nn.Module):
+    """ A hierarchical recurrent decoder.
 
     Args:
         ells (list of ints): subsequence lengths
         d_in (int): Number of tokens
-        d_h (list of ints): the hidden dimensions
         d_z (int): The size of the latent space
-        padding_idx (int): Optional: idx for padding to pass to Embedding layer
+        conductor (nn.Module): outputs conditioning for each subsequence
+        decoder (nn.Module): recurrent decoder
 
     Input:
-        z (N, d_z): should be torch.LongTensor
+        z (N, d_z):
 
     Outputs:
         X (N, L, d_in)
     """
-    pass
+    def __init__(self, ells, d_in, d_z, conductor, decoder):
+        self.conductor = conductor
+        self.decoder = decoder
+        self.ells = ells
+        self.d_in = d_in
+        self.d_z = d_z
 
-
-class CNNDecoder(nn.Module):
-    """ A hierarchical decoder using causal convolutions.
-
-    Args:
-        ells (list of ints): subsequence lengths
-        d_in (int): Number of tokens
-        d_h (list of ints): the hidden dimensions
-        d_z (int): The size of the latent space
-        padding_idx (int): Optional: idx for padding to pass to Embedding layer
-
-    Input:
-        z (N, d_z): should be torch.LongTensor
-
-    Outputs:
-        X (N, L, d_in)
-    """
-    pass
+    def forward(self, z, x):
+        c = self.conductor(z)
+        return self.decoder(x, c, self.ells)
