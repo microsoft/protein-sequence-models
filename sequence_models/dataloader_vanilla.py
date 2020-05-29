@@ -1,125 +1,136 @@
 import pandas as pd
 import numpy as np
 import math
+import random
+from copy import copy
 
 from torch.utils.data import Dataset, DataLoader
 import torch
 from torch.utils.data.sampler import SequentialSampler, RandomSampler, Sampler, \
-	BatchSampler, SubsetRandomSampler
+    BatchSampler, SubsetRandomSampler
 
 from torchnlp.samplers.sorted_sampler import SortedSampler
 from torchnlp.utils import identity
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD
+from sequence_models.constants import PAD, PROTEIN_ALPHABET
 
 
-def pad(seq, pad_token, max_length):
-	padded = seq + pad_token * (max_length-len(seq))
-	return padded
+def pad(batch, pad_idx):
+    max_len = max([len(i) for i in batch])
+    padded = [list(i) + [pad_idx]*(max_len - len(i)) for i in batch]
+    return padded
 
 class CSVDataset(Dataset):
 
-	def __init__(self, fpath: str, alphabet, pad_token=PAD):
-		self.data = pd.read_csv(fpath)
-		self.tokenizer = Tokenizer(alphabet)
-		self.pad_token = pad_token
-	
-	def __len__(self):
-		return len(self.data)
+    def __init__(self, fpath: str, alphabet,):
+        self.data = pd.read_csv(fpath)
+        self.tokenizer = Tokenizer(alphabet)
+    
+    def __len__(self):
+        return len(self.data)
 
-	def __getitem__(self, idx_padlen):
-		idx = idx_padlen[0]
-		padlen = idx_padlen[1]
-		
-		row = self.data.loc[idx]
-		padded = pad(row['sequences'], self.pad_token, padlen)
-		return self.tokenizer.tokenize(padded)
+    def __getitem__(self, idx):
+        return self.tokenizer.tokenize(self.data.loc[idx]['sequences'])
+    
+class BucketSampler(Sampler):
 
+    def __init__(self, sequence_lengths, bucket_size, sort_key=identity):
+        self.data = sequence_lengths
+        self.bucket_size = bucket_size
+        self.sort_key = sort_key
+        zip_ = [(i, self.sort_key(row)) for i, row in enumerate(self.data)]
+        zip_ = sorted(zip_, key=lambda r: r[1])
+        self.sorted_indexes = [item[0] for item in zip_]
+        
+    def __iter__(self):
+        bucket = []
+        for idx in self.sorted_indexes:
+            bucket.append(idx)
+            if len(bucket) == self.bucket_size:
+                yield bucket
+                bucket = []
+        if len(bucket) > 0:
+            yield bucket    
+    def __len__(self):
+        return len(self.data)
+    
+class ApproxBatchSampler(BatchSampler):
+    '''
+    Parameters:
+    -----------
+    sampler : Pytorch Sampler
+        Choose base sampler class to use for bucketing
+    
+    approx_token : int
+        Approximately number of tokens per batch
 
-class BucketBatchSampler(BatchSampler):
-	'''
-	Parameters:
-	-----------
-	sampler : Pytorch Sampler
-		Choose base sampler class to use for bucketing
-	
-	approx_token : int
-		Approximately number of tokens per batch
+    sample_lengths : array-like
+        List of lengths of sequences in the order of the dataset
 
-	sample_lengths : array-like
-		List of lengths of sequences in the order of the dataset
+    drop_last : bool
+        If `True` the sampler will drop the last batch if its 
+        size would be less than `batch_size`.
+    '''
 
-	drop_last : bool
-		If `True` the sampler will drop the last batch if its 
-		size would be less than `batch_size`.
+    def __init__(self, sampler, approx_token, sample_lengths,):
+        self.longest_token = 0
+        self.approx_token = approx_token
+        self.sample_lengths = sample_lengths
+        self.sampler = sampler
+        self.batch = []
 
-	sort_key : callable
-		Callable to specify a comparison key for sorting
+    def __iter__(self):
+        for bucket_idx in RandomSampler(list(self.sampler)): # get random bucket
+            bucket = list(self.sampler)[bucket_idx]
+            self.batch = []
+            for single_sample in SubsetRandomSampler(bucket): # get random sample in bucket
+                if self.longest_token == 0:
+                    self.batch = []
+                self.batch.append(single_sample) # fill batch until approx_token is met
+                self.longest_token = max(self.longest_token, self.sample_lengths[single_sample])
+                if self.longest_token * len(self.batch) >= self.approx_token:
+                    self.longest_token = 0
+                    yield self.batch
+    
+    def __len__(self):
+        return len(self.sampler)
+    
+def mask_collate_fn(batch):
+    batch_mod = []
+    batch_mod_bool = []
+    for seq in batch:
+        mod_idx = random.sample(list(range(len(seq))), int(len(seq)*0.15))
+        if len(mod_idx) == 0:
+            mod_idx = np.random.choice(list(range(len(seq))))# make sure at least one aa is chosen
+        seq_mod = copy(seq)
+        seq_mod_bool = np.array([False]*len(seq))
+        
+        for idx in mod_idx:
+            p = np.random.uniform()
 
-	bucket_size : int 
-		Size of buckets to divide data into
-	'''
+            if p <= 0.10: # do nothing
+                mod = seq[idx]
+            if 0.10 < p <= 0.20: # replace with random amino acid 
+                mod = np.random.choice([i for i in range(26) if i != seq[idx] ])
+                seq_mod_bool[idx] = True
+            if 0.20 < p <= 1.00: # mask
+                mod = PROTEIN_ALPHABET.index('#')
+                seq_mod_bool[idx] = True
 
-	def __init__(self, sampler, approx_token, sample_lengths,
-				 drop_last, sort_key=identity, bucket_size=100):
-		super().__init__(sampler, 1, drop_last)
-		self.batch_size = 1
-		self.longest_token = 0
-		self.approx_token = approx_token
-		self.sample_lengths = sample_lengths
-		self.sort_key = sort_key
-		self.bucket_sampler = BatchSampler(sampler,
-										   min(bucket_size, len(sampler)),
-										   False)
-		
+            seq_mod[idx] = mod
 
-	def __iter__(self):
-		for bucket in self.bucket_sampler:
-			sorted_sampler = SortedSampler(bucket, self.sort_key)
-			for mini_batch in SubsetRandomSampler(
-					list(BatchSampler(sorted_sampler, 1,self.drop_last))):
-				if self.longest_token == 0:
-					batch = []
-				batch.append(bucket[mini_batch[0]])
-				self.longest_token = max(self.longest_token, self.sample_lengths[bucket[mini_batch[0]]])
-				if self.longest_token * len(batch) >= self.approx_token:
-					yield_batch = [(i, self.longest_token) for i in batch]
-					self.longest_token = 0
-					yield yield_batch
-	
-	def __len__(self):
-		if self.drop_last:
-			return len(self.sampler) // self.batch_size
-		else:
-			return math.ceil(len(self.sampler) / self.batch_size)
-
-
-
-'''
-Example:
---------
-
-# load dataset into CSVDataset
-dataset = CSVDataset('UniLanguage/data/arc_frag_exp/train.csv', PROTEIN_ALPHABET, '-')
-
-# extract sequence lengths
-data_df = pd.read_csv('UniLanguage/data/arc_frag_exp/train.csv')
-sequence_lengths = [len(i) for i in data_df.sequences]
-
-# set up batch sampler - as of right now with base_sampler = SequentialSampler, 
-# bucketing will bucket the dataset according to order of dataset and then select batches with similar
-# length sequences within buckets. If we want bucketing according to size,
-# simply order csv file before passing through CSVDataset and SequentialSampler
-
-base_sampler = SequentialSampler(dataset)
-batch_sampler = BucketBatchSampler(base_sampler, approx_token=1000, sample_lengths=sequence_lengths, 
-                             bucket_size=100, drop_last=False)
-
-# build dataloader
-dataloader = DataLoader(dataset=dataset, shuffle=False, sampler=None,
-               batch_sampler=batch_sampler, num_workers=0, collate_fn=None,
-               pin_memory=False, drop_last=False, timeout=0,
-               worker_init_fn=None)
-
-'''
+        batch_mod.append(seq_mod)
+        batch_mod_bool.append(seq_mod_bool)
+        
+    #padding
+    batch_mod = pad(batch_mod, PROTEIN_ALPHABET.index('-'))
+    batch = pad(batch, PROTEIN_ALPHABET.index('-'))
+    batch_mod_bool = pad(batch_mod_bool, False)
+    
+    # rename and convert to tensor
+    src = torch.from_numpy(np.array(batch_mod)).long()
+    tgt = torch.from_numpy(np.array(batch)).long()
+    loss_mask = torch.from_numpy(np.array(batch_mod_bool)).bool()
+    
+    return src, tgt, loss_mask 
