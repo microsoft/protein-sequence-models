@@ -1,3 +1,5 @@
+from typing import List
+
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -41,7 +43,13 @@ class MaskedConv1d(nn.Conv1d):
 
 
 class MaskedCausalConv1d(nn.Module):
-    """Masked Causal 1D convolution based on https://github.com/Popgun-Labs/PopGen/. """
+    """Masked Causal 1D convolution based on https://github.com/Popgun-Labs/PopGen/. 
+
+         Shape:
+            Input: (N, L, in_channels)
+            input_mask: (N, L, 1), optional
+            Output: (N, L, , out_channels)
+    """
 
     def __init__(self, in_channels, out_channels, kernel_size=1, dilation=1, groups=1, init=None):
         """
@@ -96,8 +104,8 @@ class MaskedCausalConv1d(nn.Module):
                 return self.conv(x).transpose(1, 2)
 
             # left-pad + conv.
-            out = F.pad(x, [self.zeros, 0])
-            return self.conv(out).transpose(1, 2)
+            out = self._pad(x)
+            return self._unpad(self.conv(out)).transpose(1, 2)
 
         # sampling mode
         else:
@@ -107,6 +115,12 @@ class MaskedCausalConv1d(nn.Module):
                 self._init_recurrent_state(batch_size)
 
             return self._generate(x).transpose(1, 2)
+
+    def _pad(self, x):
+        return F.pad(x, [self.zeros, 0])
+
+    def _unpad(self, x):
+        return x
 
     def clear_cache(self):
         """
@@ -158,22 +172,60 @@ class MaskedCausalConv1d(nn.Module):
         return activations
 
 
-class ByteNetBlock(nn.Module):
-    """Residual block from ByteNet paper (https://arxiv.org/abs/1610.10099).
+class HierarchicalCausalConv1d(MaskedCausalConv1d):
+
+    """
+         Shape:
+            Input: (N, L, in_channels)
+            input_mask: (N, L, 1), optional
+            Output: (N, L, , out_channels)
     """
 
-    def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1, causal=False):
+    def __init__(self, in_channels, out_channels, ells, kernel_size=1, dilation=1, groups=1, init=None):
+        super().__init__(in_channels, out_channels, kernel_size=kernel_size,
+                         dilation=dilation, groups=groups, init=init)
+        self.ells = ells
+        self.inds = [0]
+        for ell in self.ells:
+            self.inds.append(self.inds[-1] + ell)
+        self.unpad_idx = torch.arange(sum(ells))
+        for ell in np.cumsum(self.ells[:-1]):
+            self.unpad_idx[ell:] += self.zeros
+
+    def _pad(self, x):
+        return torch.cat([MaskedCausalConv1d._pad(self, x[:, :, i: j])
+                          for i, j in zip(self.inds[:-1], self.inds[1:])], dim=2)
+
+    def _unpad(self, x):
+        return x[:, :, self.unpad_idx]
+
+
+class ByteNetBlock(nn.Module):
+    """Residual block from ByteNet paper (https://arxiv.org/abs/1610.10099).
+         Shape:
+            Input: (N, L, d_in)
+            input_mask: (N, L, 1), optional
+            Output: (N, L, d_out)
+
+    """
+
+    def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1, causal=False, ells=None):
         """
-        :param in_channels: input channels
-        :param out_channels: output channels
+        :param d_in: input channels dimension
+        :param d_h: hidden dimension
+        :param out_channels: output channels dimension
         :param kernel_size: the kernel width
         :param dilation: dilation factor
         :param groups: perform depth-wise convolutions
         :param causal: if True, chooses MaskedCausalConv1d() over MaskedConv1d()
+        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
         """
-
         super().__init__()
-        if causal:
+
+        if ells is not None:
+            self.conv = HierarchicalCausalConv1d(d_h, d_h, ells,
+                                                 kernel_size=kernel_size, dilation=dilation, groups=groups)
+        elif causal:
             self.conv = MaskedCausalConv1d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
         else:
             self.conv = MaskedConv1d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
@@ -206,8 +258,15 @@ class ByteNetBlock(nn.Module):
 class ByteNet(nn.Module):
 
     """Stacked residual blocks from ByteNet paper defined by n_layers
+         
+         Shape:
+            Input: (N, L,)
+            input_mask: (N, L, 1), optional
+            Output: (N, L,)
+
     """
-    def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r, padding_idx=None, causal=False):
+    def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
+                 ells=None, padding_idx=None, causal=False):
         """
         :param n_tokens: number of tokens in token dictionary
         :param d_embedding: dimension of embedding
@@ -215,17 +274,17 @@ class ByteNet(nn.Module):
         :param n_layers: number of layers of ByteNet block
         :param kernel_size: the kernel width
         :param r: used to calculate dilation factor
+        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
         :padding_idx: location of padding token in ordered alphabet
         :param causal: if True, chooses MaskedCausalConv1d() over MaskedConv1d()
         """
-
         super().__init__()
         self.embedder = nn.Embedding(n_tokens, d_embedding, padding_idx=padding_idx)
         self.up_embedder = PositionFeedForward(d_embedding, d_model)
         log2 = int(np.log2(r)) + 1
         dilations = [2 ** (n % log2) for n in range(n_layers)]
         layers = [
-            ByteNetBlock(d_model, d_model // 2, d_model, kernel_size, dilation=d, causal=causal)
+            ByteNetBlock(d_model, d_model // 2, d_model, kernel_size, dilation=d, causal=causal, ells=ells)
             for d in dilations
         ]
         self.layers = nn.ModuleList(modules=layers)
@@ -234,11 +293,78 @@ class ByteNet(nn.Module):
         """
         :param x: (batch, length)
         :param input_mask: (batch, length, 1)
-        :return: (batch, length, out_channels)
+        :return: (batch, length,)
         """
+        e = self._embed(x)
+        return self._convolve(e, input_mask=input_mask)
+
+    def _embed(self, x):
         e = self.embedder(x)
         e = self.up_embedder(e)
+        return e
+
+    def _convolve(self, e, input_mask=None):
         for layer in self.layers:
             e = layer(e, input_mask=input_mask)
         return e
+
+
+class ConditionedByteNetDecoder(ByteNet):
+    """ A conditioned, (hierarchical) ByteNet decoder.
+    Inputs:
+        x (n, ell)
+        c: (n, n_blocks, d_conditioning)
+        ells: lengths of blocks
+
+    """
+
+    def __init__(self, n_tokens, d_embedding, d_conditioning, d_model, n_layers, kernel_size, r, ells):
+        """
+        :param n_tokens: number of tokens in token dictionary
+        :param d_embedding: dimension of embedding
+        :param d_conditioning: dimension for conditioning, subtract from d_model
+        :param d_model: dimension to use within ByteNet model, //2 every layer
+        :param n_layers: number of layers of ByteNet block
+        :param kernel_size: the kernel width
+        :param r: used to calculate dilation factor
+        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
+        """
+        super().__init__(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
+                         ells=ells, padding_idx=None, causal=True)
+        self.up_embedder = PositionFeedForward(d_embedding, d_model - d_conditioning)
+        self.ells = nn.Parameter(torch.tensor(ells), requires_grad=False)
+
+    def _embed(self, inputs):
+        x, c = inputs
+        e = self.embedder(x)
+        e = self.up_embedder(e)  # (n, ell, d_model - d_conditioning)
+        # Concatenate the conditioning
+        c_ = torch.repeat_interleave(c, self.ells, dim=1)  # (n, ell, d_conditioning)
+        e = torch.cat([e, c_], dim=2)  # (n, ell, d_model)
+        # Mask out the unwanted connections
+        return e
+
+
+class Conductor(nn.Module):
+    """Bascially a 1D DCGAN generator."""
+
+    def __init__(self, d_z, n_features: List[int], d_out):
+        super().__init__()
+        n_features = [d_z] + n_features
+        layers = [(nn.ConvTranspose1d(nf0, nf1, 4, stride=1, bias=False),
+                   nn.BatchNorm1d(nf1),
+                   nn.ReLU())
+                  for nf0, nf1 in zip(n_features[:-1], n_features[1:])]
+        layers = [item for sublist in layers for item in sublist]
+        layers += [
+            nn.ConvTranspose1d(n_features[-1], d_out, 4, stride=1, bias=False),
+            nn.Tanh()
+        ]
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        if len(x.shape) == 2:
+            x = x.unsqueeze(-1)
+        return self.layers(x)
+
 
