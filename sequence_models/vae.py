@@ -5,6 +5,7 @@ import torch
 import torch.optim as optim
 from apex import amp
 import mlflow
+from torch import nn as nn
 
 from sequence_models.losses import VAELoss
 from sequence_models.layers import FCStack
@@ -204,6 +205,17 @@ class VAE(nn.Module):
         return self.decode(z), mu, log_var
 
 
+class RecurrentVAE(VAE):
+
+    def forward(self, x: torch.tensor):
+        mu, log_var = self.encode(x)
+        z = self.reparameterize(mu, log_var)
+        return self.decode(z, x), mu, log_var
+
+    def decode(self, z, x):
+        return self.decoder(z, x)
+
+
 class FCEncoder(nn.Module):
     """ A simple fully-connected encoder for sequences.
 
@@ -287,13 +299,57 @@ class HierarchicalRecurrentDecoder(nn.Module):
     Outputs:
         X (N, L, d_in)
     """
-    def __init__(self, ells, d_in, d_z, conductor, decoder):
+    def __init__(self, conductor, decoder):
+        super().__init__()
         self.conductor = conductor
         self.decoder = decoder
-        self.ells = ells
-        self.d_in = d_in
-        self.d_z = d_z
+        self.d_z = self.conductor.d_z
 
     def forward(self, z, x):
         c = self.conductor(z)
-        return self.decoder(x, c, self.ells)
+        return self.decoder((x, c))
+
+
+class Conductor(nn.Module):
+    """Bascially a 1D DCGAN generator."""
+
+    def __init__(self, d_z, n_features: List[int], d_out):
+        super().__init__()
+        self.d_z = d_z
+        n_features = [d_z] + n_features
+        layers = [(nn.ConvTranspose1d(nf0, nf1, 4, stride=1, bias=False),
+                   nn.BatchNorm1d(nf1),
+                   nn.ReLU())
+                  for nf0, nf1 in zip(n_features[:-1], n_features[1:])]
+        layers = [item for sublist in layers for item in sublist]
+        layers += [
+            nn.ConvTranspose1d(n_features[-1], d_out, 4, stride=1, bias=False),
+            nn.Tanh()
+        ]
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        if len(x.shape) == 2:
+            x = x.unsqueeze(-1)
+        return self.layers(x).transpose(1, 2)
+
+
+# class ConvEncoder(nn.Module):
+#
+#     def __init__(self, n_tokens, d_z, n_features: List[int]):
+#         super().__init__()
+#         self.embedding = nn.Embedding(n_tokens, n_features[0])
+#         n_features = n_features[1:]
+#         layers = [(nn.Conv1d(nf0, nf1, 4, stride=1, bias=False),
+#                    nn.BatchNorm1d(nf1),
+#                    nn.ReLU())
+#                   for nf0, nf1 in zip(n_features[:-1], n_features[1:])]
+#         layers = [item for sublist in layers for item in sublist]
+#         layers += [
+#             nn.ConvTranspose1d(n_features[-1], d_z * 2, 4, stride=1, bias=False),
+#         ]
+#         self.layers = nn.Sequential(*layers)
+#
+#     def forward(self, x):
+#         e = self.embedding(x).transpose(1, 2)
+#         z = self.layers(e).transpose(1, 2)

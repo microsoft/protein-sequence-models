@@ -1,5 +1,3 @@
-from typing import List
-
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -265,28 +263,5 @@ class ConditionedByteNetDecoder(ByteNet):
         e = torch.cat([e, c_], dim=2)  # (n, ell, d_model)
         # Mask out the unwanted connections
         return e
-
-
-class Conductor(nn.Module):
-    """Bascially a 1D DCGAN generator."""
-
-    def __init__(self, d_z, n_features: List[int], d_out):
-        super().__init__()
-        n_features = [d_z] + n_features
-        layers = [(nn.ConvTranspose1d(nf0, nf1, 4, stride=1, bias=False),
-                   nn.BatchNorm1d(nf1),
-                   nn.ReLU())
-                  for nf0, nf1 in zip(n_features[:-1], n_features[1:])]
-        layers = [item for sublist in layers for item in sublist]
-        layers += [
-            nn.ConvTranspose1d(n_features[-1], d_out, 4, stride=1, bias=False),
-            nn.Tanh()
-        ]
-        self.layers = nn.Sequential(*layers)
-
-    def forward(self, x):
-        if len(x.shape) == 2:
-            x = x.unsqueeze(-1)
-        return self.layers(x)
 
 

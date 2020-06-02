@@ -1,6 +1,6 @@
 import torch
-from sequence_models.convolutional import ByteNetBlock, ByteNet, ConditionedByteNetDecoder, Conductor
-
+from sequence_models.convolutional import ByteNetBlock, ByteNet, ConditionedByteNetDecoder
+from sequence_models.vae import Conductor
 
 device = torch.device('cuda')
 b = 5
