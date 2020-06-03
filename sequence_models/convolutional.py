@@ -21,6 +21,15 @@ class MaskedConv1d(nn.Conv1d):
     def __init__(self, in_channels: int, out_channels: int,
                  kernel_size: int, stride: int=1, dilation: int=1, groups: int=1,
                  bias: bool=True):
+        """
+        :param in_channels: input channels
+        :param out_channels: output channels
+        :param kernel_size: the kernel width
+        :param stride: filter shift
+        :param dilation: dilation factor
+        :param groups: perform depth-wise convolutions
+        :param bias: adds learnable bias to output
+        """
         padding = dilation * (kernel_size - 1) // 2
         super().__init__(in_channels, out_channels, kernel_size, stride=stride, dilation=dilation,
                                            groups=groups, bias=bias, padding=padding)
@@ -32,7 +41,13 @@ class MaskedConv1d(nn.Conv1d):
 
 
 class MaskedCausalConv1d(nn.Module):
-    """Masked Causal 1D convolution based on https://github.com/Popgun-Labs/PopGen/. """
+    """Masked Causal 1D convolution based on https://github.com/Popgun-Labs/PopGen/. 
+         
+         Shape:
+            Input: (N, L, in_channels)
+            input_mask: (N, L, 1), optional
+            Output: (N, L, , out_channels)
+    """
 
     def __init__(self, in_channels, out_channels, kernel_size=1, dilation=1, groups=1, init=None):
         """
@@ -157,7 +172,24 @@ class MaskedCausalConv1d(nn.Module):
 
 class HierarchicalCausalConv1d(MaskedCausalConv1d):
 
+    """
+         Shape:
+            Input: (N, L, in_channels)
+            input_mask: (N, L, 1), optional
+            Output: (N, L, , out_channels)
+    """
+
     def __init__(self, in_channels, out_channels, ells, kernel_size=1, dilation=1, groups=1, init=None):
+        """
+        :param d_in: input channels dimension
+        :param d_h: hidden dimension
+        :param out_channels: output channels dimension
+        :param kernel_size: the kernel width
+        :param dilation: dilation factor
+        :param groups: perform depth-wise convolutions
+        :param causal: if True, chooses MaskedCausalConv1d() over MaskedConv1d()
+        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
+        """
         super().__init__(in_channels, out_channels, kernel_size=kernel_size,
                          dilation=dilation, groups=groups, init=init)
         self.ells = ells
@@ -177,7 +209,14 @@ class HierarchicalCausalConv1d(MaskedCausalConv1d):
 
 
 class ByteNetBlock(nn.Module):
-    """Residual block from ByteNet paper (https://arxiv.org/abs/1610.10099)."""
+    """Residual block from ByteNet paper (https://arxiv.org/abs/1610.10099).
+         
+         Shape:
+            Input: (N, L, d_in)
+            input_mask: (N, L, 1), optional
+            Output: (N, L, d_out)
+
+    """
 
     def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1, causal=False, ells=None):
         super().__init__()
@@ -204,6 +243,11 @@ class ByteNetBlock(nn.Module):
         self.sequence2 = nn.Sequential(*layers2)
 
     def forward(self, x, input_mask=None):
+        """
+        :param x: (batch, length, in_channels)
+        :param input_mask: (batch, length, 1)
+        :return: (batch, length, out_channels)
+        """
         return x + self.sequence2(
             self.conv(self.sequence1(x), input_mask=input_mask)
         )
@@ -211,8 +255,28 @@ class ByteNetBlock(nn.Module):
 
 class ByteNet(nn.Module):
 
+    """Stacked residual blocks from ByteNet paper defined by n_layers
+         
+         Shape:
+            Input: (N, L,)
+            input_mask: (N, L, 1), optional
+            Output: (N, L,)
+
+    """
+
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
                  ells=None, padding_idx=None, causal=False):
+        """
+        :param n_tokens: number of tokens in token dictionary
+        :param d_embedding: dimension of embedding
+        :param d_model: dimension to use within ByteNet model, //2 every layer
+        :param n_layers: number of layers of ByteNet block
+        :param kernel_size: the kernel width
+        :param r: used to calculate dilation factor
+        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
+        :padding_idx: location of padding token in ordered alphabet
+        :param causal: if True, chooses MaskedCausalConv1d() over MaskedConv1d()
+        """
         super().__init__()
         self.embedder = nn.Embedding(n_tokens, d_embedding, padding_idx=padding_idx)
         self.up_embedder = PositionFeedForward(d_embedding, d_model)
@@ -225,6 +289,11 @@ class ByteNet(nn.Module):
         self.layers = nn.ModuleList(modules=layers)
 
     def forward(self, x, input_mask=None):
+        """
+        :param x: (batch, length)
+        :param input_mask: (batch, length, 1)
+        :return: (batch, length,)
+        """
         e = self._embed(x)
         return self._convolve(e, input_mask=input_mask)
 
@@ -249,6 +318,16 @@ class ConditionedByteNetDecoder(ByteNet):
     """
 
     def __init__(self, n_tokens, d_embedding, d_conditioning, d_model, n_layers, kernel_size, r, ells):
+        """
+        :param n_tokens: number of tokens in token dictionary
+        :param d_embedding: dimension of embedding
+        :param d_conditioning: dimension for conditioning, subtract from d_model
+        :param d_model: dimension to use within ByteNet model, //2 every layer
+        :param n_layers: number of layers of ByteNet block
+        :param kernel_size: the kernel width
+        :param r: used to calculate dilation factor
+        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
+        """
         super().__init__(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
                          ells=ells, padding_idx=None, causal=True)
         self.up_embedder = PositionFeedForward(d_embedding, d_model - d_conditioning)
