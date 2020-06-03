@@ -1,19 +1,11 @@
 import torch
 from sequence_models.convolutional import ByteNetBlock, ByteNet, ConditionedByteNetDecoder
-from sequence_models.vae import Conductor
 
-device = torch.device('cuda')
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
 b = 5
-dz = 8
-d_out = 4
-n_f = [1024, 256, 512, 64]
-layer = Conductor(dz, n_f, d_out).to(device)
-z = torch.randn(b, dz).to(device)
-out = layer(z)
-assert out.shape == (b, d_out, 2 ** len(n_f))
-z = torch.randn(b, dz, 1).to(device)
-out = layer(z)
-assert out.shape == (b, d_out, 2 ** len(n_f))
 
 d = 8
 ell = 7

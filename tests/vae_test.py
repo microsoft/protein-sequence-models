@@ -4,8 +4,12 @@ import torch.nn.functional as F
 import torch
 
 from sequence_models.losses import VAELoss, SequenceCrossEntropyLoss
-from sequence_models.vae import FCDecoder, FCEncoder, VAE
+from sequence_models.vae import FCDecoder, FCEncoder, VAE, Conductor
 
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
 
 N = 2
 L = 5
@@ -108,3 +112,17 @@ def test_loss():
     assert torch.allclose(r_loss + beta * kl_loss.sum(dim=1), loss)
     assert torch.allclose(r, r_loss)
     assert torch.allclose(k, kl_loss.sum(dim=1))
+
+
+def test_conductor():
+    b = 5
+    dz = 8
+    d_out = 4
+    n_f = [np.random.randint(64, 128) for _ in range(np.random.randint(3, 8))]
+    layer = Conductor(dz, n_f, d_out).to(device)
+    z = torch.randn(b, dz).to(device)
+    out = layer(z)
+    assert out.shape == (b, 2 ** (len(n_f) + 2), d_out)
+    z = torch.randn(b, dz, 1).to(device)
+    out = layer(z)
+    assert out.shape == (b, 2 ** (len(n_f) + 2), d_out,)

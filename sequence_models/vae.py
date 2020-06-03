@@ -311,19 +311,22 @@ class HierarchicalRecurrentDecoder(nn.Module):
 
 
 class Conductor(nn.Module):
-    """Bascially a 1D DCGAN generator."""
+    """Basically a 1D DCGAN generator."""
 
     def __init__(self, d_z, n_features: List[int], d_out):
         super().__init__()
         self.d_z = d_z
         n_features = [d_z] + n_features
-        layers = [(nn.ConvTranspose1d(nf0, nf1, 4, stride=1, bias=False),
-                   nn.BatchNorm1d(nf1),
-                   nn.ReLU())
-                  for nf0, nf1 in zip(n_features[:-1], n_features[1:])]
-        layers = [item for sublist in layers for item in sublist]
+        layers = []
+        for nf0, nf1 in zip(n_features[:-1], n_features[1:]):
+            if len(layers) == 0:
+                layers.append(nn.ConvTranspose1d(nf0, nf1, 4, stride=1, bias=False))
+            else:
+                layers.append(nn.ConvTranspose1d(nf0, nf1, 4, stride=2, padding=1, bias=False))
+            layers.append(nn.BatchNorm1d(nf1))
+            layers.append(nn.ReLU())
         layers += [
-            nn.ConvTranspose1d(n_features[-1], d_out, 4, stride=1, bias=False),
+            nn.ConvTranspose1d(n_features[-1], d_out, 4, stride=2, padding=1, bias=False),
             nn.Tanh()
         ]
         self.layers = nn.Sequential(*layers)
