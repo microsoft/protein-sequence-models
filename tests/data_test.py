@@ -1,6 +1,6 @@
 import numpy as np
 
-from sequence_models.dataloader import SortishSampler, ApproxBatchSampler
+from sequence_models.data import SortishSampler, ApproxBatchSampler
 
 n_samples = np.random.randint(100, 500)
 lengths = np.random.randint(100, 200, n_samples)
