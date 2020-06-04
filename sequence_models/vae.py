@@ -41,27 +41,28 @@ class VAETrainer(object):
         self.save_freq = save_freq
         self.current_epoch = 0
 
-    def step(self, src, train=True, weights=None):
+    def step(self, src, tgt, train=True, weights=None):
         """Do a forward pass. Do a backward pass if train=True. """
         if train:
             self.vae = self.vae.train()
             self.optimizer.zero_grad()
         else:
             self.vae = self.vae.eval()
-        loss, r_loss, kl_loss, accu = self._forward(src, weights=weights)
+        loss, r_loss, kl_loss, accu = self._forward(src, tgt, weights=weights)
         if train:
             self._backward(loss)
         return loss.item(), r_loss.item(), kl_loss.item(), accu.item()
 
-    def _forward(self, src, weights=None):
+    def _forward(self, src, tgt, weights=None):
         src = src.to(self.device)
+        tgt = tgt.to(self.device)
         p, z_mu, z_log_var = self.vae(src)
         if self.anneal_epochs == -1:
             beta = self.beta
         else:
             beta = self.beta * min(self.current_epoch / self.anneal_epochs, 1.0)
-        loss, r_loss, kl_loss = self.loss_func(p, src, z_mu, z_log_var, beta=beta, sample_weights=weights)
-        accu = self.accu_func(p, src)
+        loss, r_loss, kl_loss = self.loss_func(p, tgt, z_mu, z_log_var, beta=beta, sample_weights=weights)
+        accu = self.accu_func(p, tgt)
         return loss, r_loss, kl_loss, accu
 
     def _backward(self, loss):
@@ -81,11 +82,19 @@ class VAETrainer(object):
         accus = 0.0
         for i, batch in enumerate(loader):
             src = batch[0]
-            if len(batch) == 2:
-                weights = batch[1]
+            if isinstance(self.vae, RecurrentVAE):
+                tgt = batch[1]
+                if len(batch) == 3:
+                    weights = batch[2]
+                else:
+                    weights = None
             else:
-                weights = None
-            loss, r_loss, kl_loss, accu = self.step(src, train=train, weights=weights)
+                tgt = batch[0]
+                if len(batch) == 2:
+                    weights = batch[1]
+                else:
+                    weights = None
+            loss, r_loss, kl_loss, accu = self.step(src, tgt, train=train, weights=weights)
             losses += loss
             r_losses += r_loss
             kl_losses += kl_loss
@@ -207,13 +216,13 @@ class VAE(nn.Module):
 
 class RecurrentVAE(VAE):
 
-    def forward(self, x: torch.tensor):
-        mu, log_var = self.encode(x)
+    def forward(self, src):
+        mu, log_var = self.encode(src)
         z = self.reparameterize(mu, log_var)
-        return self.decode(z, x), mu, log_var
+        return self.decode(z, src), mu, log_var
 
-    def decode(self, z, x):
-        return self.decoder(z, x)
+    def decode(self, z, src):
+        return self.decoder(z, src)
 
 
 class FCEncoder(nn.Module):
