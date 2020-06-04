@@ -15,7 +15,7 @@ class MaskedConv1d(nn.Conv1d):
          Shape:
             Input: (N, L, in_channels)
             input_mask: (N, L, 1), optional
-            Output: (N, L, , out_channels)
+            Output: (N, L, out_channels)
     """
 
     def __init__(self, in_channels: int, out_channels: int,
@@ -46,7 +46,7 @@ class MaskedCausalConv1d(nn.Module):
          Shape:
             Input: (N, L, in_channels)
             input_mask: (N, L, 1), optional
-            Output: (N, L, , out_channels)
+            Output: (N, L, out_channels)
     """
 
     def __init__(self, in_channels, out_channels, kernel_size=1, dilation=1, groups=1, init=None):
