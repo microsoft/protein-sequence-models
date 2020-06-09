@@ -95,7 +95,7 @@ class MLMCollater(SimpleCollater):
                 p = np.random.uniform()
                 if p <= 0.10:  # do nothing
                     mod = seq[idx]
-                if 0.10 < p <= 0.20:  # replace with random amino acid
+                elif 0.10 < p <= 0.20:  # replace with random amino acid
                     mod = np.random.choice([i for i in ALL_AAS if i != seq[idx]])
                 else:  # mask
                     mod = MASK
