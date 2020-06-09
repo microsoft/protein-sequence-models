@@ -1,6 +1,5 @@
 from typing import List, Any, Iterable
 import random
-from copy import copy
 import math
 
 import numpy as np
@@ -10,7 +9,7 @@ import pandas as pd
 
 from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD, START, STOP, MASK
-from sequence_models.constants import PROTEIN_ALPHABET, ALL_AAS
+from sequence_models.constants import ALL_AAS
 
 
 class CSVDataset(Dataset):
@@ -150,7 +149,7 @@ class SortishSampler(Sampler):
 
 
 class ApproxBatchSampler(BatchSampler):
-    '''
+    """
 	Parameters:
 	-----------
 	sampler : Pytorch Sampler
@@ -164,7 +163,7 @@ class ApproxBatchSampler(BatchSampler):
 
 	sample_lengths : array-like
 		List of lengths of sequences in the order of the dataset
-	'''
+	"""
 
     def __init__(self, sampler, max_tokens, max_batch, sample_lengths):
         self.longest_token = 0
