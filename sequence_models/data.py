@@ -1,6 +1,6 @@
 from typing import List, Any, Iterable
 import random
-from copy import copy
+import math
 
 import numpy as np
 import torch
@@ -8,14 +8,17 @@ from torch.utils.data import Dataset, Sampler, BatchSampler
 import pandas as pd
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD, START, STOP
-from sequence_models.constants import PROTEIN_ALPHABET
+from sequence_models.constants import PAD, START, STOP, MASK
+from sequence_models.constants import ALL_AAS
 
 
 class CSVDataset(Dataset):
 
-    def __init__(self, fpath: str, split=None, outputs=[]):
-        self.data = pd.read_csv(fpath)
+    def __init__(self, fpath=None, df=None, split=None, outputs=[]):
+        if df is None:
+            self.data = pd.read_csv(fpath)
+        else:
+            self.data = df
         if split is not None:
             self.data = self.data[self.data['split'] == split]
         self.outputs = outputs
@@ -35,30 +38,35 @@ class SimpleCollater(object):
         self.pad = pad
         self.tokenizer = Tokenizer(alphabet)
 
-    def __call__(self, batch: List[Any],) -> List[torch.Tensor]:
+    def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
         sequences = data[0]
+        sequences = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in sequences]
         if self.pad:
-            sequences = _pad(sequences, PAD)
-        sequences = torch.LongTensor([self.tokenizer.tokenize(s) for s in sequences])
+            pad_idx = self.tokenizer.alphabet.index(PAD)
+            sequences = _pad(sequences, pad_idx)
+        else:
+            sequences = torch.tensor(sequences)
         data = (torch.tensor(d) for d in data[1:])
         return [sequences, *data]
 
 
 class LMCollater(SimpleCollater):
 
-    def __call__(self, batch: List[Any],) -> List[torch.Tensor]:
+    def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
         sequences = data[0]
         src = [START + s for s in sequences]
         tgt = [s + STOP for s in sequences]
-        if self.pad:
-            src = _pad(src, PAD)
-            tgt = _pad(tgt, PAD)
-        src = torch.LongTensor([self.tokenizer.tokenize(s) for s in src])
-        tgt = torch.LongTensor([self.tokenizer.tokenize(s) for s in tgt])
+        src = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in src]
+        tgt = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in tgt]
+        mask = [torch.ones_like(t) for t in tgt]
+        pad_idx = self.tokenizer.alphabet.index(PAD)
+        src = _pad(src, pad_idx)
+        tgt = _pad(tgt, pad_idx)
+        mask = _pad(mask, 0)
         data = (torch.tensor(d) for d in data[1:])
-        return [src, tgt, *data]
+        return [src, tgt, mask, *data]
 
 
 def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
@@ -70,29 +78,78 @@ def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
     return output
 
 
+class MLMCollater(SimpleCollater):
+
+    def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
+        data = tuple(zip(*batch))
+        sequences = data[0]
+        tgt = data[0]
+        src = []
+        mask = []
+        for seq in sequences:
+            mod_idx = random.sample(list(range(len(seq))), int(len(seq) * 0.15))
+            if len(mod_idx) == 0:
+                mod_idx = np.random.choice(list(range(len(seq))))  # make sure at least one aa is chosen
+            seq_mod = list(seq)
+            for idx in mod_idx:
+                p = np.random.uniform()
+                if p <= 0.10:  # do nothing
+                    mod = seq[idx]
+                elif 0.10 < p <= 0.20:  # replace with random amino acid
+                    mod = np.random.choice([i for i in ALL_AAS if i != seq[idx]])
+                else:  # mask
+                    mod = MASK
+                seq_mod[idx] = mod
+            src.append(''.join(seq_mod))
+            m = torch.zeros(len(seq_mod))
+            m[mod_idx] = 1
+            mask.append(m)
+        src = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in src]
+        tgt = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in tgt]
+        pad_idx = self.tokenizer.alphabet.index(PAD)
+        src = _pad(src, pad_idx)
+        tgt = _pad(tgt, pad_idx)
+        mask = _pad(mask, 0)
+        data = (torch.tensor(d) for d in data[1:])
+        return [src, tgt, mask, *data]
+
+
 class SortishSampler(Sampler):
     """Returns indices such that inputs with similar lengths are close together."""
 
-    def __init__(self, sequence_lengths: Iterable, bucket_size: int):
+    def __init__(self, sequence_lengths: Iterable, bucket_size: int, num_replicas: int = 1, rank: int = 0):
         self.data = np.argsort(sequence_lengths)
+        self.num_replicas = num_replicas
+        self.num_samples = int(math.ceil(len(self.data) * 1.0 / self.num_replicas))
         self.bucket_size = bucket_size
         n_buckets = int(np.ceil(len(self.data) / self.bucket_size))
         self.data = [self.data[i * bucket_size: i * bucket_size + bucket_size] for i in range(n_buckets)]
+        self.rank = rank
+        self.epoch = 0
+        self.total_size = self.num_samples * self.num_replicas
 
     def __iter__(self):
+        np.random.seed(self.epoch)
         for bucket in self.data:
             np.random.shuffle(bucket)
         np.random.shuffle(self.data)
-        for bucket in self.data:
-            for idx in bucket:
-                yield idx
+        indices = [item for sublist in self.data for item in sublist]
+        indices += indices[:(self.total_size - len(indices))]
+        assert len(indices) == self.total_size
+        # subsample
+        indices = indices[self.rank:self.total_size:self.num_replicas]
+        assert len(indices) == self.num_samples
+        return iter(indices)
 
     def __len__(self):
-        return sum([len(data) for data in self.data])
+        return self.num_samples
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
 
 
 class ApproxBatchSampler(BatchSampler):
-    '''
+    """
 	Parameters:
 	-----------
 	sampler : Pytorch Sampler
@@ -106,7 +163,7 @@ class ApproxBatchSampler(BatchSampler):
 
 	sample_lengths : array-like
 		List of lengths of sequences in the order of the dataset
-	'''
+	"""
 
     def __init__(self, sampler, max_tokens, max_batch, sample_lengths):
         self.longest_token = 0
@@ -131,43 +188,3 @@ class ApproxBatchSampler(BatchSampler):
                 yield batch
                 batch = [idx]
                 length = this_length
-
-
-def mlm_collate_fn(batch):
-    batch_mod = []
-    batch_mod_bool = []
-    for seq in batch:
-        mod_idx = random.sample(list(range(len(seq))), int(len(seq) * 0.15))
-        if len(mod_idx) == 0:
-            mod_idx = np.random.choice(list(range(len(seq))))  # make sure at least one aa is chosen
-        seq_mod = copy(seq)
-        seq_mod_bool = np.array([False] * len(seq))
-
-        for idx in mod_idx:
-            p = np.random.uniform()
-
-            if p <= 0.10:  # do nothing
-                mod = seq[idx]
-            if 0.10 < p <= 0.20:  # replace with random amino acid
-                mod = np.random.choice([i for i in range(26) if i != seq[idx]])
-                seq_mod_bool[idx] = True
-            if 0.20 < p <= 1.00:  # mask
-                mod = PROTEIN_ALPHABET.index('#')
-                seq_mod_bool[idx] = True
-
-            seq_mod[idx] = mod
-
-        batch_mod.append(seq_mod)
-        batch_mod_bool.append(seq_mod_bool)
-
-    # padding
-    batch_mod = _pad(batch_mod, PROTEIN_ALPHABET.index('-'))
-    batch = _pad(batch, PROTEIN_ALPHABET.index('-'))
-    batch_mod_bool = _pad(batch_mod_bool, False)
-
-    # rename and convert to tensor
-    src = torch.from_numpy(np.array(batch_mod)).long()
-    tgt = torch.from_numpy(np.array(batch)).long()
-    loss_mask = torch.from_numpy(np.array(batch_mod_bool)).bool()
-
-    return src, tgt, loss_mask

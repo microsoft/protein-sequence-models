@@ -12,6 +12,7 @@ class SequenceCrossEntropyLoss(nn.Module):
         self.ignore_index = ignore_index
 
     def forward(self, prediction, tgt, reduction='mean'):
+        # Transpose because pytorch expects (N, C, ...) where C is number of classes
         return F.cross_entropy(prediction.transpose(1, 2), tgt, weight=self.class_weights, reduction=reduction,
                                ignore_index=self.ignore_index)
 
