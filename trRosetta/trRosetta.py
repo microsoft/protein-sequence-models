@@ -1,13 +1,9 @@
 import os,sys
-import tensorflow as tf
-import wget
-import tarfile
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils import *
-from arguments import *
+from utils_pytorch import *
 
 def pad_size(d, k, s):
     return int(((139*s) - 140 + k + ((k-1)*(d-1)))/2)
@@ -17,10 +13,10 @@ class trRosettaBlock(nn.Module):
     def __init__(self, dilation):
         super(trRosettaBlock, self).__init__()
         self.conv1 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation,3,1))
-        self.instnorm1 = nn.InstanceNorm2d(n2d_filters, eps=1e-06, affine=True)
+        self.instnorm1 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
 #         self.dropout1 = nn.Dropout2d(0.15)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation,3,1) )
-        self.instnorm2 = nn.InstanceNorm2d(n2d_filters, eps=1e-06, affine=True)
+        self.instnorm2 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
         
     def forward(self, x, old_elu,):
         x = F.elu(self.instnorm1(self.conv1(x)))
@@ -34,8 +30,8 @@ class trRosetta(nn.Module):
     def __init__(self, n2d_layers, model_id='a'):
         super(trRosetta, self).__init__()
         
-        self.conv0 = nn.Conv2d(526, n2d_filters, kernel_size=1, stride=1, padding=pad_size(1,1,1))
-        self.instnorm0 = nn.InstanceNorm2d(n2d_filters, eps=1e-06, affine=True)
+        self.conv0 = nn.Conv2d(526, 64, kernel_size=1, stride=1, padding=pad_size(1,1,1))
+        self.instnorm0 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
         
         dilation = 1
         layers = []
@@ -92,60 +88,17 @@ class trRosetta(nn.Module):
     
     def load_weights(self, model_id):
         
-        # check to see if previously downloaded
-        if not os.path.exists('model_weights'):
-            os.mkdir('model_weights')
-        if len(os.listdir('model_weights')) == 0:
-            wget.download('https://files.ipd.uw.edu/pub/trRosetta/model2019_07.tar.bz2', out = 'model_weights')
-            model_file = tarfile.open('model_weights/' + os.listdir('model_weights')[0], mode = 'r:bz2')
-            model_file.extractall('model_weights')
-            model_file.close()
+        path = 'model_weights/pytorch_weights/' + 'pytorch_weights_' + model_id + '.pt'
         
-        # extract weights from model_file
-        filename = next(os.walk('model_weights'))[1][0]
-        all_model = os.listdir('model_weights/' + filename)
-        ckpt = 'model_weights/'+ filename + '/' + 'model.xa' + model_id
-        print('Loading in model: xa' + model_id)
-        w_vars = tf.train.list_variables(ckpt) # get weight names
-        
-        # filter weights
-        w_vars_fil = [i for i in w_vars if 'Adam' not in i[0]]
-        instnorm_beta_vars = [i[0] for i in w_vars_fil if 'InstanceNorm' in i[0] and 'beta' in i[0]]
-        instnorm_gamma_vars = [i[0] for i in w_vars_fil if 'InstanceNorm' in i[0] and 'gamma' in i[0]]
-        conv_kernel_vars = [i[0] for i in w_vars_fil if 'conv2d' in i[0] and 'kernel' in i[0]]
-        conv_bias_vars = [i[0] for i in w_vars_fil if 'conv2d' in i[0] and 'bias' in i[0]]
-
-        # order weights
-        w_vars_ord = [conv_kernel_vars[0], conv_bias_vars[0], instnorm_gamma_vars[0], instnorm_beta_vars[0]]
-        for i in range(len(conv_kernel_vars)):
-            if 'conv2d_' + str(i) + '/kernel' in conv_kernel_vars:
-                w_vars_ord.append('conv2d_' + str(i) + '/kernel')
-            if 'conv2d_' + str(i) + '/bias' in conv_bias_vars:
-                w_vars_ord.append('conv2d_' + str(i) + '/bias')
-            if 'InstanceNorm_' + str(i) + '/gamma' in instnorm_gamma_vars:
-                w_vars_ord.append('InstanceNorm_' + str(i) + '/gamma')
-            if 'InstanceNorm_' + str(i) + '/beta' in instnorm_beta_vars:
-                w_vars_ord.append('InstanceNorm_' + str(i) + '/beta')
-        
-#         tf_weight_dict = {name:tf.train.load_variable(ckpt, name) for name in w_vars_ord}
-        weights_list = [tf.train.load_variable(ckpt, name) for name in w_vars_ord]
-        
-        # replace pytorch model weights
-        torch_weight_dict = {}
-        weights_idx = 0
-        for name, param in self.named_parameters():
-            if len(weights_list[weights_idx].shape) == 4:
-                torch_weight_dict[name] = torch.from_numpy(weights_list[weights_idx]).to(torch.float64).permute(3,2,0,1)
-            else:
-                torch_weight_dict[name] = torch.from_numpy(weights_list[weights_idx]).to(torch.float64)
-            weights_idx += 1
-    
-        self.load_state_dict(torch_weight_dict)
-        
+        # check to see if pytorch weights exist, if not -> generate
+        if not os.path.exists(path):
+            tf_to_pytorch_weights(self.named_parameters(), model_id)
+            
+        self.load_state_dict(torch.load(path))
         
         
 class trRosettaEnsemble(nn.Module):
-    def __init__(self, model, n2d_layers=61, model_ids='abcde'):
+    def __init__(self, model, n2d_layers=61, model_ids='abcde',):
         '''
         Parameters:
         -----------
@@ -169,3 +122,18 @@ class trRosettaEnsemble(nn.Module):
             output.append(mod(x))
             
         return output
+
+# EXAMPLE
+# filename = 'example/T1001.a3m' 
+# seqs = parse_a3m(filename) # grab seqs
+# tokenizer = Tokenizer(PROTEIN_ALPHABET) 
+# seqs = [tokenizer.tokenize(i) for i in seqs] # ohe into our order
+
+# base_model = trRosetta
+# input_token_order = PROTEIN_ALPHABET
+# ensemble = trRosettaEnsemble(base_model, n2d_layers=61,model_ids='abcde')
+# preprocess = trRosettaPreprocessing(input_token_order=PROTEIN_ALPHABET, wmin=0.8)
+# x = preprocess.process(seqs)
+# with torch.no_grad():
+#     ensemble.eval()
+#     outputs = ensemble(x.double())
