@@ -12,6 +12,24 @@ from sequence_models.constants import PAD, START, STOP, MASK
 from sequence_models.constants import ALL_AAS
 
 
+class FlatDataset(Dataset):
+
+    def __init__(self, fpath, offsets, cols=[1]):
+        self.fpath = fpath
+        self.offsets = offsets
+        self.cols = cols
+
+    def __len__(self):
+        return len(self.offsets)
+
+    def __getitem__(self, idx):
+        with open(self.fpath, 'r') as f:
+            f.seek(self.offsets[idx])
+            line = f.readline()[:-1]  # strip the \n
+            line = line.split(',')
+            return [line[i] for i in self.cols]
+
+
 class CSVDataset(Dataset):
 
     def __init__(self, fpath=None, df=None, split=None, outputs=[]):
@@ -89,7 +107,7 @@ class MLMCollater(SimpleCollater):
         for seq in sequences:
             mod_idx = random.sample(list(range(len(seq))), int(len(seq) * 0.15))
             if len(mod_idx) == 0:
-                mod_idx = np.random.choice(list(range(len(seq))))  # make sure at least one aa is chosen
+                mod_idx = [np.random.choice(list(range(len(seq))))]  # make sure at least one aa is chosen
             seq_mod = list(seq)
             for idx in mod_idx:
                 p = np.random.uniform()
