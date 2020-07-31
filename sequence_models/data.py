@@ -64,7 +64,7 @@ class SimpleCollater(object):
             pad_idx = self.tokenizer.alphabet.index(PAD)
             sequences = _pad(sequences, pad_idx)
         else:
-            sequences = torch.tensor(sequences)
+            sequences = torch.stack(sequences)
         data = (torch.tensor(d) for d in data[1:])
         return [sequences, *data]
 
