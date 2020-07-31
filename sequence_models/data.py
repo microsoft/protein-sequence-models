@@ -71,11 +71,19 @@ class SimpleCollater(object):
 
 class LMCollater(SimpleCollater):
 
-    def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
+    def __init__(self, alphabet: str, pad=False, backwards=False):
+        super().__init__(alphabet, pad=pad)
+        self.backwards = backwards
+
+    def __call__(self, batch: List[Any]) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
         sequences = data[0]
-        src = [START + s for s in sequences]
-        tgt = [s + STOP for s in sequences]
+        if not self.backwards:
+            src = [START + s for s in sequences]
+            tgt = [s + STOP for s in sequences]
+        else:
+            src = [STOP + s[::-1] for s in sequences]
+            tgt = [s[::-1] + START for s in sequences]
         src = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in src]
         tgt = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in tgt]
         mask = [torch.ones_like(t) for t in tgt]
