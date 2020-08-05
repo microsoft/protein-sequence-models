@@ -265,7 +265,7 @@ class ByteNet(nn.Module):
     """
 
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                 ells=None, padding_idx=None, causal=False):
+                 ells=None, padding_idx=None, causal=False, dropout=0.0):
         """
         :param n_tokens: number of tokens in token dictionary
         :param d_embedding: dimension of embedding
@@ -287,6 +287,7 @@ class ByteNet(nn.Module):
             for d in dilations
         ]
         self.layers = nn.ModuleList(modules=layers)
+        self.dropout = dropout
 
     def forward(self, x, input_mask=None):
         """
@@ -305,6 +306,8 @@ class ByteNet(nn.Module):
     def _convolve(self, e, input_mask=None):
         for layer in self.layers:
             e = layer(e, input_mask=input_mask)
+            if self.dropout > 0.0:
+                e = F.dropout(e, self.dropout)
         return e
 
 
