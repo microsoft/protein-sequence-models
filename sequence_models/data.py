@@ -59,14 +59,17 @@ class SimpleCollater(object):
     def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
         sequences = data[0]
+        prepped = self._prep(sequences)
+        return prepped
+
+    def _prep(self, sequences):
         sequences = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in sequences]
         if self.pad:
             pad_idx = self.tokenizer.alphabet.index(PAD)
             sequences = _pad(sequences, pad_idx)
         else:
             sequences = torch.stack(sequences)
-        data = (torch.tensor(d) for d in data[1:])
-        return [sequences, *data]
+        return (sequences, )
 
 
 class LMCollater(SimpleCollater):
@@ -75,9 +78,7 @@ class LMCollater(SimpleCollater):
         super().__init__(alphabet, pad=pad)
         self.backwards = backwards
 
-    def __call__(self, batch: List[Any]) -> List[torch.Tensor]:
-        data = tuple(zip(*batch))
-        sequences = data[0]
+    def _prep(self, sequences):
         if not self.backwards:
             src = [START + s for s in sequences]
             tgt = [s + STOP for s in sequences]
@@ -91,8 +92,7 @@ class LMCollater(SimpleCollater):
         src = _pad(src, pad_idx)
         tgt = _pad(tgt, pad_idx)
         mask = _pad(mask, 0)
-        data = (torch.tensor(d) for d in data[1:])
-        return [src, tgt, mask, *data]
+        return src, tgt, mask
 
 
 def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
@@ -106,10 +106,8 @@ def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
 
 class MLMCollater(SimpleCollater):
 
-    def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
-        data = tuple(zip(*batch))
-        sequences = data[0]
-        tgt = data[0]
+    def _prep(self, sequences):
+        tgt = sequences[:]
         src = []
         mask = []
         for seq in sequences:
@@ -136,8 +134,7 @@ class MLMCollater(SimpleCollater):
         src = _pad(src, pad_idx)
         tgt = _pad(tgt, pad_idx)
         mask = _pad(mask, 0)
-        data = (torch.tensor(d) for d in data[1:])
-        return [src, tgt, mask, *data]
+        return src, tgt, mask
 
 
 class SortishSampler(Sampler):
