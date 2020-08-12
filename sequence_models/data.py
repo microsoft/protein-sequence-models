@@ -79,12 +79,18 @@ class LMCollater(SimpleCollater):
         self.backwards = backwards
 
     def _prep(self, sequences):
+        return self._tokenize_and_mask(*self._split(sequences))
+
+    def _split(self, sequences):
         if not self.backwards:
             src = [START + s for s in sequences]
             tgt = [s + STOP for s in sequences]
         else:
             src = [STOP + s[::-1] for s in sequences]
             tgt = [s[::-1] + START for s in sequences]
+        return src, tgt
+
+    def _tokenize_and_mask(self, src, tgt):
         src = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in src]
         tgt = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in tgt]
         mask = [torch.ones_like(t) for t in tgt]
@@ -102,6 +108,23 @@ def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
     for row, t in enumerate(tokenized):
         output[row, :len(t)] = t
     return output
+
+
+class AncestorCollater(LMCollater):
+
+    def __call__(self, batch):
+        data = tuple(zip(*batch))
+        sequences, ancestors = data[:2]
+        prepped = self._prep(sequences, ancestors)
+        return prepped
+
+    def _prep(self, sequences, ancestors):
+        if self.backwards:
+            sequences = [s[::-1] for s in sequences]
+            ancestors = [a[::-1] for a in ancestors]
+        src = [START + s + STOP + a for s, a in zip(sequences, ancestors)]
+        tgt = [s + STOP + a + STOP for s, a in zip(sequences, ancestors)]
+        return self._tokenize_and_mask(src, tgt)
 
 
 class MLMCollater(SimpleCollater):
