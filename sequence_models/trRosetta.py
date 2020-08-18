@@ -108,7 +108,7 @@ class trRosettaEnsemble(nn.Module):
         '''
 
         super(trRosettaEnsemble, self).__init__()
-        self.model_list = []
+        self.model_list = nn.ModuleList()
         for i in list(model_ids):
             params = {'model_id': i, 'n2d_layers': n2d_layers, 'decoder': decoder}
             self.model_list.append(model(**params))
