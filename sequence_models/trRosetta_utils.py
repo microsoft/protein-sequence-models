@@ -2,15 +2,17 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
-import tensorflow as tf
 import wget
 import tarfile
 import string
 
+from sequence_models.constants import WEIGHTS_DIR
+
+
 # probably move this into a collate_fn 
 class trRosettaPreprocessing():
     
-    def __init__(self, input_token_order, wmin):
+    def __init__(self, input_token_order, wmin=0.8):
         self.ohe_dict = self._build_ohe_dict(input_token_order)
         self.wmin = wmin
         self.seqlen = 0
@@ -123,29 +125,33 @@ class trRosettaPreprocessing():
 def tf_to_pytorch_weights(model_params, model_id):
 
     # check to see if previously downloaded weights, if not -> download
-    if not os.path.exists('model_weights'):
-        os.mkdir('model_weights')
-            
-    if len(os.listdir('model_weights')) == 0:
+    if not os.path.exists(WEIGHTS_DIR):
+        os.mkdir(WEIGHTS_DIR)
+    tr_src_dir = WEIGHTS_DIR + 'trrosetta_tf_weights/'
+    if not os.path.exists(tr_src_dir):
+        os.mkdir(tr_src_dir)
+    zip_fpath = tr_src_dir + 'model_weights.tar.bz2'
+    tf_fpath = tr_src_dir + 'model2019_07/'
+    if len(os.listdir(tr_src_dir)) == 0:
         print('grabbing weights from source...')
-        wget.download('https://files.ipd.uw.edu/pub/trRosetta/model2019_07.tar.bz2', out = 'model_weights')
-        model_file = tarfile.open('model_weights/' + os.listdir('model_weights')[0], mode = 'r:bz2')
-        model_file.extractall('model_weights')
+        wget.download('https://files.ipd.uw.edu/pub/trRosetta/model2019_07.tar.bz2', out=zip_fpath)
+        model_file = tarfile.open(zip_fpath, mode='r:bz2')
+        model_file.extractall(tr_src_dir)
         model_file.close()
-        
-        
+
     # check to see if converted to pytorch weights yet
-    if not os.path.exists('model_weights/pytorch_weights'):
-        os.mkdir('model_weights/pytorch_weights')
+    tr_tgt_dir = WEIGHTS_DIR + 'trrosetta_pytorch_weights/'
+    if not os.path.exists(tr_tgt_dir):
+        os.mkdir(tr_tgt_dir)
         
-    model_path = 'model_weights/pytorch_weights/pytorch_weights_' + model_id + '.pt'
+    model_path = tr_tgt_dir + model_id + '.pt'
     
     if not os.path.exists(model_path):
         print('converting model %s weights from tensorflow to pytorch...' % model_id)
     
-        tf_path = next(os.walk('model_weights'))[1][0]
-        ckpt = 'model_weights/'+ tf_path + '/' + 'model.xa' + model_id
-        w_vars = tf.train.list_variables(ckpt) # get weight names
+        ckpt = tf_fpath + 'model.xa' + model_id
+        import tensorflow as tf
+        w_vars = tf.train.list_variables(ckpt)  # get weight names
         
         # filter weights
         w_vars_fil = [i for i in w_vars if 'Adam' not in i[0]]

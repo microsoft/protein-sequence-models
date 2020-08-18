@@ -1,3 +1,8 @@
+import pathlib
+
+home = str(pathlib.Path.home())
+WEIGHTS_DIR = home + '/sm_weights/'
+
 #  It's helpful to separate out the twenty canonical amino acids from the rest
 CAN_AAS = 'ACDEFGHIKLMNPQRSTVWY'
 AMB_AAS = 'BZX'
@@ -24,3 +29,5 @@ IUPAC_SS = 'HSTC'
 DSSP = 'GHITEBSC'
 SS8 = DSSP
 SS3 = 'HSL'  # H: GHI; S: EB; L: STC
+
+
