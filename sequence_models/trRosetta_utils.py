@@ -8,16 +8,40 @@ import string
 
 from sequence_models.constants import WEIGHTS_DIR
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # probably move this into a collate_fn 
 class trRosettaPreprocessing():
+    """Preprocessing a3m files to torch tensors for trRosetta"""
 
     def __init__(self, input_token_order, wmin=0.8):
+        """
+        Parameters:
+        -----------
+        input_token_order : str
+            order of your amino acid alphabet
+        
+        wmin : float
+            sequence identity value cutoff 
+        """
+        
         self.ohe_dict = self._build_ohe_dict(input_token_order)
         self.wmin = wmin
         self.seqlen = 0
 
     def _build_ohe_dict(self, input_order):
+        """Convert your alphabet order to the one trRosetta uses
+        
+        Parameters:
+        -----------
+        input_token_order : str
+            order of your amino acid alphabet
+            
+        Returns:
+        --------
+        ohe_dict : dict
+            map between your alphabet order and trRosetta order
+        """
         trR_order = "ARNDCQEGHILKMFPSTWYV-"
         ohe_dict = {}
         for i in input_order:
@@ -28,12 +52,44 @@ class trRosettaPreprocessing():
         return ohe_dict
 
     def _convert_ohe(self, seqs, ohe_dict):
+        """Convert sequence to ohe
+        
+        Parameters:
+        -----------
+        seqs : list
+            list of sequence from MSAs
+            
+        ohe_dict : dict
+            map between your alphabet order and trRosetta order
+            
+        Returns:
+        --------
+        * : torch.Tensor
+            one-hot-encodings of sequences, (num_of_seqs, len(seq))
+        """
+        
         processed_seqs = []
         for seq in seqs:
             processed_seqs.append([ohe_dict[i] for i in seq])
         return torch.Tensor(np.array(processed_seqs)).to(torch.int8)
 
     def _one_hot_embedding(self, seqs, num_classes):
+        """Scatter one hot encoding
+        
+        Parameters:
+        -----------
+        seqs : torch.Tensor
+            one-hot-encodings of sequences, (num_of_seqs, len(seq))
+            
+        num_classes : int
+            size of amino acid alphabet 
+            
+        Returns:
+        --------
+        * : torch.Tensor
+            one-hot-encodings of sequences, (1, num_of_seqs, len(seq), 21)
+        """
+        
         one_hot_embedded = []
         for seq in seqs:
             encoded = torch.eye(num_classes)
@@ -42,6 +98,24 @@ class trRosettaPreprocessing():
         return stacked.reshape((1, stacked.shape[0], stacked.shape[1], stacked.shape[2]))
 
     def _reweight_py(self, msa1hot, cutoff, eps=1e-9):
+        """Scatter one hot encoding
+        
+        Parameters:
+        -----------
+        msa1hot : torch.Tensor
+            one hot encoded MSA seqs
+            
+        cutoff : float
+            sequence identity value cutoff 
+        
+        eps : float
+            margin to prevent divide by 0
+            
+        Returns:
+        --------
+        * : torch.Tensor
+            weights for sequence, (1, num_of_seq)
+        """
         self.seqlen = msa1hot.size(2)
         id_min = self.seqlen * cutoff
         id_mtx = torch.stack([torch.tensordot(el, el, [[1, 2], [1, 2]]) for el in msa1hot], 0)
@@ -50,6 +124,21 @@ class trRosettaPreprocessing():
         return weights
 
     def _extract_features_1d(self, msa1hot, weights):
+        """Get 1d features
+
+        Parameters:
+        -----------
+        msa1hot : torch.Tensor
+            one hot encoded MSA seqs
+            
+        weights : torch.Tensor
+            weights for sequences
+            
+        Returns:
+        --------
+        f1d : torch.Tensor
+            1d features (1, len(seq), 42)
+        """
         # 1D Features
         f1d_seq = msa1hot[:, 0, :, :20]
         batch_size = msa1hot.size(0)
@@ -64,6 +153,24 @@ class trRosettaPreprocessing():
         return f1d
 
     def _extract_features_2d(self, msa1hot, weights, penalty=4.5):
+        """Get 2d features
+
+        Parameters:
+        -----------
+        msa1hot : torch.Tensor
+            one hot encoded MSA seqs
+            
+        weights : torch.Tensor
+            weights for sequences
+
+        penalty : float
+            penalty for inv. covariance
+            
+        Returns:
+        --------
+        f2d_dca : torch.Tensor
+            2d features (1, len(seq), len(seq), 442)
+        """
         # 2D Features
         batch_size = msa1hot.size(0)
         num_alignments = msa1hot.size(1)
@@ -108,6 +215,18 @@ class trRosettaPreprocessing():
         return f2d_dca
 
     def process(self, x):
+        """Do all preprocessing steps
+        
+        Parameters:
+        -----------
+        x : list
+            list of sequences from MSA
+        
+        Returns:
+        --------
+        features : torch.Tensor, (1, 526, len(seq), len(seq))
+            input for trRosetta
+        """
         x = self._convert_ohe(x, self.ohe_dict).reshape(len(x), -1)
         x = self._one_hot_embedding(x, 21)
         w = self._reweight_py(x, self.wmin)
@@ -123,6 +242,17 @@ class trRosettaPreprocessing():
 
 
 def tf_to_pytorch_weights(model_params, model_id):
+    """Generate trRosetta weights for pytorch
+        
+    Parameters:
+    -----------
+    model_params : torch's model self.named_parameters()
+        name of param and param
+        
+    model_id: str
+        pretrained models a, b, c, d and/or e.
+        
+    """
     # check to see if previously downloaded weights, if not -> download
     if not os.path.exists(WEIGHTS_DIR):
         os.mkdir(WEIGHTS_DIR)
@@ -189,6 +319,19 @@ def tf_to_pytorch_weights(model_params, model_id):
 
 
 def parse_a3m(filename):
+    """Load a3m file to list of sequences
+        
+    Parameters:
+    -----------
+    filename : str
+        path to a3m file
+        
+    Returns:
+    --------
+    seqs : list
+        list of seqs in MSA
+        
+    """
     seqs = []
     table = str.maketrans(dict.fromkeys(string.ascii_lowercase))
 

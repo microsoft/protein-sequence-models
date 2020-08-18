@@ -14,8 +14,17 @@ def pad_size(d, k, s):
 
 
 class trRosettaBlock(nn.Module):
-
+        
     def __init__(self, dilation):
+        
+        """Simple convolution block
+        
+        Parameters:
+        -----------
+        dilation : int
+            dilation for conv
+        """
+
         super(trRosettaBlock, self).__init__()
         self.conv1 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
         self.instnorm1 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
@@ -24,6 +33,23 @@ class trRosettaBlock(nn.Module):
         self.instnorm2 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
 
     def forward(self, x, old_elu, ):
+        """
+        Parameters:
+        -----------
+        x : torch.Tensor()
+            input tensor
+            
+        old_elu : torch.Tensor()
+            copy of x
+        
+        Returns:
+        --------
+        x : torch.Tensor
+            output of block
+
+        x.clone() : torch.Tensor
+            copy of x
+        """
         x = F.elu(self.instnorm1(self.conv1(x)))
         #         x = self.dropout1(x)
         x = F.elu(self.instnorm2(self.conv2(x)) + old_elu)
@@ -31,8 +57,21 @@ class trRosettaBlock(nn.Module):
 
 
 class trRosetta(nn.Module):
+    
+    """trRosetta for single model"""
 
     def __init__(self, n2d_layers=61, model_id='a', decoder=True):
+        """
+        Parameters:
+        -----------
+        model_id : str
+            pretrained models a, b, c, d and/or e.
+    
+        decoder : bool
+            whether to run the last layers to produce distance 
+            and angle outputs
+
+        """
         super(trRosetta, self).__init__()
 
         self.conv0 = nn.Conv2d(526, 64, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
@@ -59,6 +98,29 @@ class trRosetta(nn.Module):
             self.load_weights(model_id)
 
     def forward(self, x, ):
+        """
+        Parameters:
+        -----------
+        x : torch.Tensor, (1, 526, len(sequence), len(sequence))
+            inputs after trRosettaPreprocessing
+    
+        Returns:
+        --------
+        dist_probs : torch.Tensor
+            distance map probabilities
+            
+        theta_probs : torch.Tensor
+            theta angle map probabilities
+            
+        phi_probs : torch.Tensor
+            phi angle map probabilities
+        
+        omega_probs: torch..Tensor
+            omega angle map probabilities
+        
+        x : torch.Tensor
+            outputs before calculating final layers
+        """
         x = F.elu(self.instnorm0(self.conv0(x)))
         old_elu = x.clone()
         for layer in self.layers:
@@ -85,6 +147,13 @@ class trRosetta(nn.Module):
             return x
 
     def load_weights(self, model_id):
+        
+        """
+        Parameters:
+        -----------
+        model_id : str
+            pretrained models a, b, c, d and/or e.
+        """
 
         path = WEIGHTS_DIR + 'trrosetta_pytorch_weights/' + model_id + '.pt'
 
@@ -95,25 +164,38 @@ class trRosetta(nn.Module):
 
 
 class trRosettaEnsemble(nn.Module):
+    """trRosetta ensemble"""
     def __init__(self, model, n2d_layers=61, model_ids='abcde', decoder=True):
-        '''
+        """
         Parameters:
         -----------
-        model: base model in for ensemble
+        model : class 
+            base model to use in ensemble
         
-        n2d_layers: number of layers of the conv block to use for each base model
+        n2d_layers : int 
+            number of layers of the conv block to use for each base model
         
-        model_ids: pretrained models a, b, c, d and/or e. 
+        model_ids: str
+            pretrained models to use in the ensemble a, b, c, d and/or e. 
+            
+        decoder : bool
+            if True, return dist, omega, phi, theta; else return layer prior decoder
         
-        '''
+        """
 
         super(trRosettaEnsemble, self).__init__()
         self.model_list = []
         for i in list(model_ids):
             params = {'model_id': i, 'n2d_layers': n2d_layers, 'decoder': decoder}
-            self.model_list.append(model(**params))
+            self.model_list.append(model(**params).to(device))
 
     def forward(self, x):
+        """
+        Parameters:
+        -----------
+        x : torch.Tensor, (1, 526, len(sequence), len(sequence))
+            inputs after trRosettaPreprocessing
+        """
         return [mod(x) for mod in self.model_list]
 
 # EXAMPLE
