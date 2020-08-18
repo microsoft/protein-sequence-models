@@ -32,7 +32,7 @@ class trRosettaBlock(nn.Module):
 
 class trRosetta(nn.Module):
 
-    def __init__(self, n2d_layers, model_id='a', decoder=True):
+    def __init__(self, n2d_layers=61, model_id='a', decoder=True):
         super(trRosetta, self).__init__()
 
         self.conv0 = nn.Conv2d(526, 64, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
@@ -98,7 +98,7 @@ class trRosetta(nn.Module):
 
 
 class trRosettaEnsemble(nn.Module):
-    def __init__(self, model, n2d_layers=61, model_ids='abcde', device=device, decoder=True):
+    def __init__(self, model, n2d_layers=61, model_ids='abcde', decoder=True):
         '''
         Parameters:
         -----------
@@ -113,8 +113,8 @@ class trRosettaEnsemble(nn.Module):
         super(trRosettaEnsemble, self).__init__()
         self.model_list = []
         for i in list(model_ids):
-            params = {'model_id': i, 'n2d_layers': n2d_layers}
-            self.model_list.append(model(**params, decoder=decoder))
+            params = {'model_id': i, 'n2d_layers': n2d_layers, 'decoder': decoder}
+            self.model_list.append(model(**params))
 
     def forward(self, x):
         return [mod(x) for mod in self.model_list]
