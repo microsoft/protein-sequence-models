@@ -77,9 +77,6 @@ class trRosetta(nn.Module):
             logits_dist = self.conv_dist(x)
             dist_probs = self.softmax(logits_dist)
 
-            logits_bb = self.conv_bb(x)
-            bb_probs = self.softmax(logits_bb)
-
             logits_omega = self.conv_omega(x)
             omega_probs = self.softmax(logits_omega)
 
