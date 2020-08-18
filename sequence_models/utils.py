@@ -4,6 +4,23 @@ import numpy as np
 
 from sequence_models.constants import STOP, START, MASK, PAD
 
+
+def parse_fasta(fasta_fpath):
+    """ Read in a fasta file and extract just the sequences."""
+    seqs = []
+    with open(fasta_fpath) as f_in:
+        current = ''
+        _ = f_in.readline()
+        for line in f_in:
+            if line[0] == '>':
+                seqs.append(current)
+                current = ''
+            else:
+                current += line[:-1]
+        seqs.append(current)
+    return seqs
+
+
 def read_fasta(fasta_fpath, out_fpath, header='sequence'):
     """ Read in a fasta file and extract just the sequences."""
     with open(fasta_fpath) as f_in, open(out_fpath, 'w') as f_out:
@@ -17,6 +34,9 @@ def read_fasta(fasta_fpath, out_fpath, header='sequence'):
             else:
                 current += line[:-1]
         f_out.write(current + '\n')
+
+
+
 
 
 class Tokenizer(object):
