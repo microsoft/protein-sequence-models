@@ -118,8 +118,10 @@ class trRosettaPreprocessing():
         right = f1d.unsqueeze(1).repeat(1, self.seqlen, 1, 1)
         features = torch.cat((left, right, f2d), -1)
         features = features.permute(0, 3, 1, 2)
-
         return features
+
+    def __call__(self, x):
+        return self.process(x)
 
 
 def tf_to_pytorch_weights(model_params, model_id):
