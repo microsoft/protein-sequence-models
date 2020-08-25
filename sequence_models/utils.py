@@ -1,24 +1,38 @@
 from typing import Iterable
 
 import numpy as np
+from scipy.spatial.distance import squareform, pdist
 
 from sequence_models.constants import STOP, START, MASK, PAD
+from sequence_models.constants import PROTEIN_ALPHABET
 
 
-def parse_fasta(fasta_fpath):
+def get_weights(seqs):
+    scale = 1.0
+    theta = 0.2
+    seqs = np.array([[PROTEIN_ALPHABET.index(a) for a in s] for s in seqs])
+    weights = scale / (np.sum(squareform(pdist(seqs, metric="hamming")) < theta, axis=0))
+    return weights
+
+
+def parse_fasta(fasta_fpath, return_names=False):
     """ Read in a fasta file and extract just the sequences."""
     seqs = []
     with open(fasta_fpath) as f_in:
         current = ''
-        _ = f_in.readline()
+        names = [f_in.readline()[1:-1]]
         for line in f_in:
             if line[0] == '>':
                 seqs.append(current)
                 current = ''
+                names.append(line[1:-1])
             else:
                 current += line[:-1]
         seqs.append(current)
-    return seqs
+    if return_names:
+        return seqs, names
+    else:
+        return seqs
 
 
 def read_fasta(fasta_fpath, out_fpath, header='sequence'):
@@ -34,9 +48,6 @@ def read_fasta(fasta_fpath, out_fpath, header='sequence'):
             else:
                 current += line[:-1]
         f_out.write(current + '\n')
-
-
-
 
 
 class Tokenizer(object):
