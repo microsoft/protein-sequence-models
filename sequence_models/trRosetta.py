@@ -6,8 +6,6 @@ import torch.nn.functional as F
 from sequence_models.trRosetta_utils import *
 from sequence_models.constants import WEIGHTS_DIR
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
 
 def pad_size(d, k, s):
     return int(((139 * s) - 140 + k + ((k - 1) * (d - 1))) / 2)
@@ -187,7 +185,7 @@ class trRosettaEnsemble(nn.Module):
         self.model_list = nn.ModuleList()
         for i in list(model_ids):
             params = {'model_id': i, 'n2d_layers': n2d_layers, 'decoder': decoder}
-            self.model_list.append(model(**params).to(device))
+            self.model_list.append(model(**params))
 
     def forward(self, x):
         """
