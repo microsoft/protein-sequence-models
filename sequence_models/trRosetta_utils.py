@@ -1,12 +1,12 @@
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import os
 import wget
 import tarfile
 import string
 
-from sequence_models.constants import WEIGHTS_DIR
+from sequence_models.constants import WEIGHTS_DIR, trR_ALPHABET
 
 
 # probably move this into a collate_fn 
@@ -23,8 +23,10 @@ class trRosettaPreprocessing():
         wmin : float
             sequence identity value cutoff
         """
-
-        self.ohe_dict = self._build_ohe_dict(input_token_order)
+        if input_token_order == trR_ALPHABET:
+            self.ohe_dict = None
+        else:
+            self.ohe_dict = self._build_ohe_dict(input_token_order)
         self.wmin = wmin
         self.seqlen = 0
 
@@ -41,7 +43,7 @@ class trRosettaPreprocessing():
         ohe_dict : dict
             map between your alphabet order and trRosetta order
         """
-        trR_order = "ARNDCQEGHILKMFPSTWYV-"
+        trR_order = trR_ALPHABET
         ohe_dict = {}
         for i in input_order:
             if i in trR_order:
@@ -50,7 +52,7 @@ class trRosettaPreprocessing():
                 ohe_dict[input_order.index(i)] = trR_order.index('-')
         return ohe_dict
 
-    def _convert_ohe(self, seqs, ohe_dict):
+    def _convert_ohe(self, seqs):
         """Convert sequence to ohe
 
         Parameters:
@@ -69,32 +71,8 @@ class trRosettaPreprocessing():
 
         processed_seqs = []
         for seq in seqs:
-            processed_seqs.append([ohe_dict[i] for i in seq])
+            processed_seqs.append([self.ohe_dict[i] for i in seq])
         return torch.Tensor(np.array(processed_seqs)).to(torch.int8)
-
-    def _one_hot_embedding(self, seqs, num_classes):
-        """Scatter one hot encoding
-
-        Parameters:
-        -----------
-        seqs : torch.Tensor
-            one-hot-encodings of sequences, (num_of_seqs, len(seq))
-
-        num_classes : int
-            size of amino acid alphabet
-
-        Returns:
-        --------
-        * : torch.Tensor
-            one-hot-encodings of sequences, (1, num_of_seqs, len(seq), 21)
-        """
-
-        one_hot_embedded = []
-        for seq in seqs:
-            encoded = torch.eye(num_classes)
-            one_hot_embedded.append(encoded[seq.long()])
-        stacked = torch.stack(one_hot_embedded)
-        return stacked.reshape((1, stacked.shape[0], stacked.shape[1], stacked.shape[2]))
 
     def _reweight_py(self, msa1hot, cutoff, eps=1e-9):
         """Scatter one hot encoding
@@ -197,8 +175,7 @@ class trRosettaPreprocessing():
                         dtype=weights.dtype)[None]
         reg = reg * penalty / weights.sum(1, keepdims=True).sqrt().unsqueeze(2)
         cov_reg = cov + reg
-        inv_cov = torch.stack([torch.inverse(cr) for cr in cov_reg.unbind(0)], 0)
-
+        inv_cov = torch.inverse(cov_reg)
         x1 = inv_cov.view(batch_size, self.seqlen, num_symbols, self.seqlen, num_symbols)
         x2 = x1.permute(0, 1, 3, 2, 4)
         features = x2.reshape(batch_size, self.seqlen, self.seqlen, num_symbols * num_symbols)
@@ -226,8 +203,10 @@ class trRosettaPreprocessing():
         features : torch.Tensor, (1, 526, len(seq), len(seq))
             input for trRosetta
         """
-        x = self._convert_ohe(x, self.ohe_dict).reshape(len(x), -1)
-        x = self._one_hot_embedding(x, 21)
+        if self.ohe_dict is not None:
+            x = self._convert_ohe(x, self.ohe_dict).reshape(len(x), -1)
+        x = F.one_hot(x, len(trR_ALPHABET)).unsqueeze(0).float()
+        # x = self._one_hot_embedding(x, len(trR_ALPHABET))
         w = self._reweight_py(x, self.wmin)
         f1d = self._extract_features_1d(x, w)
         f2d = self._extract_features_2d(x, w)
