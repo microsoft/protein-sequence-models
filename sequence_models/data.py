@@ -1,6 +1,8 @@
 from typing import List, Any, Iterable
 import random
 import math
+import subprocess
+import string
 
 import numpy as np
 import torch
@@ -9,7 +11,37 @@ import pandas as pd
 
 from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD, START, STOP, MASK
-from sequence_models.constants import ALL_AAS
+from sequence_models.constants import ALL_AAS, trR_ALPHABET
+
+
+class FFDataset(Dataset):
+
+    def __init__(self, stem):
+        self.index = stem + 'ffindex'
+        self.data = stem + 'ffdata'
+        result = subprocess.run(['wc', '-l', self.index], stdout=subprocess.PIPE)
+        self.length = int(result.stdout.decode('utf-8').split(' ')[0])
+        self.tokenizer = Tokenizer(trR_ALPHABET)
+        self.table = str.maketrans(dict.fromkeys(string.ascii_lowercase))
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        result = subprocess.run(['ffindex_get', self.data, self.index, '-n', str(idx + 1)],
+                                stdout=subprocess.PIPE)
+        a3m = result.stdout.decode('utf-8')
+        seqs = []
+        for line in a3m.split('\n'):
+            # skip labels
+            if len(line) > 0 and line[0] != '>':
+                # remove lowercase letters and right whitespaces
+                s = line.rstrip().translate(self.table)
+                if len(s) > 900:
+                    return torch.tensor([])
+                seqs.append(s)
+        seqs = torch.tensor([self.tokenizer.tokenize(s) for s in seqs])
+        return seqs
 
 
 class FlatDataset(Dataset):
