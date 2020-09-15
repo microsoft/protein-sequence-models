@@ -16,7 +16,7 @@ from sequence_models.constants import ALL_AAS, trR_ALPHABET
 
 class FFDataset(Dataset):
 
-    def __init__(self, stem, max_len=np.inf):
+    def __init__(self, stem, max_len=np.inf, tr_only=True):
         self.index = stem + 'ffindex'
         self.data = stem + 'ffdata'
         result = subprocess.run(['wc', '-l', self.index], stdout=subprocess.PIPE)
@@ -24,6 +24,7 @@ class FFDataset(Dataset):
         self.tokenizer = Tokenizer(trR_ALPHABET)
         self.table = str.maketrans(dict.fromkeys(string.ascii_lowercase))
         self.max_len = max_len
+        self.tr_only = tr_only
 
     def __len__(self):
         return self.length
@@ -41,7 +42,9 @@ class FFDataset(Dataset):
                 continue
             if line[0] != '>':
                 # remove lowercase letters and right whitespaces
-                s = line.rstrip().translate(self.table).replace('X', '-')
+                s = line.rstrip().translate(self.table)
+                if self.tr_only:
+                    s = ''.join([a if a in trR_ALPHABET else '-' for a in s])
                 if len(s) > self.max_len:
                     return torch.tensor([])
                 seqs.append(s)
