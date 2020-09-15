@@ -1,6 +1,9 @@
 import pathlib
+import os
 
-home = str(pathlib.Path.home())
+home = os.getenv('PT_DATA_DIR')
+if home is None:
+    home = str(pathlib.Path.home())
 WEIGHTS_DIR = home + '/sm_weights/'
 
 #  It's helpful to separate out the twenty canonical amino acids from the rest
