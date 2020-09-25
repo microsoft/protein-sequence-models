@@ -393,15 +393,15 @@ def get_node_features(omega, theta, phi):
     """
 
     # omega is symmetric, n1 is omega angle relative to prior
-    n1 = torch.cat((torch.tensor([np.nan]), torch.diagonal(omega, offset=1)))
+    n1 = torch.cat((torch.tensor([0.]), torch.diagonal(omega, offset=1)))
     
     # theta is asymmetric, n2 and n3 relative to prior
-    n2 = torch.cat((torch.diagonal(theta, offset=1), torch.tensor([np.nan])))
-    n3 = torch.cat((torch.tensor([np.nan]), torch.diagonal(theta, offset=-1)))
+    n2 = torch.cat((torch.diagonal(theta, offset=1), torch.tensor([0.])))
+    n3 = torch.cat((torch.tensor([0.]), torch.diagonal(theta, offset=-1)))
     
     # phi is asymmetric n4 and n5 relative to prior
-    n4 = torch.cat((torch.diagonal(phi, offset=1), torch.tensor([np.nan])))
-    n5 = torch.cat((torch.tensor([np.nan]), torch.diagonal(phi, offset=-1)))
+    n4 = torch.cat((torch.diagonal(phi, offset=1), torch.tensor([0.])))
+    n5 = torch.cat((torch.tensor([0.]), torch.diagonal(phi, offset=-1)))
     
     ns = torch.stack([n1, n2, n3, n4, n5], dim=1)
     
@@ -450,12 +450,24 @@ def get_k_neighbors(dist, k):
     E_idx = []
     if not isinstance(dist, int):
         for i in range(len(dist)):
-            E_idx.append(get_k_neighbors_idx(dist[i,:], k))
+            val, idx = torch.topk(dist[i], len(dist), largest=False)
+            idx_temp = torch.where(torch.isnan(val)*1 == 0)[0]
+            E_idx_temp = idx[idx_temp]
+            if len(E_idx_temp) < k:
+                rem = k - len(E_idx_temp)
+                closest = get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(len(dist))))-i),
+                    len(dist))[1:]
+                closest = torch.tensor([i.item() for i in closest if i not in E_idx_temp][:rem])
+                E_idx_temp = torch.cat([E_idx_temp, closest])
+            else:
+                E_idx_temp = E_idx_temp[:k]
+            E_idx.append(E_idx_temp)
     else:
         for i in range(dist):
             E_idx.append(get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(dist)))-i),k+1)[1:])
-    
     return torch.stack(E_idx)
+
+
 
 
 def get_edge_features(dist, omega, theta, phi, E_idx):
@@ -512,7 +524,7 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
     return torch.stack(E, dim=2)
 
 
-def get_mask(E, V):
+def get_mask(E):
     """
     Get mask to hide node with missing features
 
@@ -527,8 +539,9 @@ def get_mask(E, V):
         mask to hide nodes with missing features
     """
     mask_E = torch.tensor(np.isfinite(np.sum(np.array(E),-1)).astype(np.float32)).view(E.shape[0], E.shape[1], 1)
-    mask_V = torch.tensor(np.isfinite(np.sum(np.array(V),-1)).astype(np.float32)).view(1,-1)
-    return mask_V, mask_E
+    # mask_V = torch.tensor(np.isfinite(np.sum(np.array(V),-1)).astype(np.float32)).view(1,-1)
+    # return mask_V, mask_E
+    return mask_E
 
 
 def replace_nan(E):
@@ -658,7 +671,7 @@ class Struct2SeqDecoder(nn.Module):
         mask = mask.type(torch.float32)
         return mask
 
-    def forward(self, V, E, E_idx, S, mask_V, mask_E):
+    def forward(self, V, E, E_idx, S, mask_E):
         """
         Parameters:
         -----------
@@ -718,20 +731,22 @@ class Struct2SeqDecoder(nn.Module):
         mask_bw : applies both masks together
         """
         mask_attend = self._autoregressive_mask(E_idx).unsqueeze(-1)
-        mask_1D = mask_V.view([mask_V.size(0), mask_V.size(1), 1, 1])
-        mask_bw = mask_1D * mask_E * mask_attend
+        # mask_1D = mask_V.view([mask_V.size(0), mask_V.size(1), 1, 1])
+        # mask_bw = mask_1D * mask_E * mask_attend
+        mask_bw = mask_E * mask_attend
         
-        mask_fw = mask_1D * (1. - mask_attend)
+        # mask_fw = mask_1D * (1. - mask_attend)
+        mask_fw = mask_E * (1. - mask_attend)
         h_ESV_encoder_fw = mask_fw * h_ESV_encoder
         
         for layer in self.decoder_layers:
             # Masked positions attend to encoder information, unmasked see. 
             h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
             h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw
-            h_V = layer(h_V, h_ESV, mask_V=mask_V)
+            h_V = layer(h_V, h_ESV, mask_V=None)
         
         logits = self.W_out(h_V) 
         log_probs = F.log_softmax(logits, dim=-1)
-        return log_probs, h_V
+        return log_probs
 
     
