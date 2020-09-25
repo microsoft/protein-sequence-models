@@ -392,16 +392,16 @@ def get_node_features(omega, theta, phi):
         {sin, cos}×(ωi, φi, φ_ri, ψi, ψ_ri). 
     """
 
-    # omega is symmetric
-    n1 = torch.cat((torch.tensor([0]), torch.diagonal(omega, offset=1)))
+    # omega is symmetric, n1 is omega angle relative to prior
+    n1 = torch.cat((torch.tensor([np.nan]), torch.diagonal(omega, offset=1)))
     
-    # theta is asymmetric
-    n2 = torch.cat((torch.diagonal(theta, offset=1), torch.tensor([0])))
-    n3 = torch.cat((torch.tensor([0]), torch.diagonal(theta, offset=-1)))
+    # theta is asymmetric, n2 and n3 relative to prior
+    n2 = torch.cat((torch.diagonal(theta, offset=1), torch.tensor([np.nan])))
+    n3 = torch.cat((torch.tensor([np.nan]), torch.diagonal(theta, offset=-1)))
     
-    # phi is asymmetric
-    n4 = torch.cat((torch.diagonal(phi, offset=1), torch.tensor([0])))
-    n5 = torch.cat((torch.tensor([0]), torch.diagonal(phi, offset=-1)))
+    # phi is asymmetric n4 and n5 relative to prior
+    n4 = torch.cat((torch.diagonal(phi, offset=1), torch.tensor([np.nan])))
+    n5 = torch.cat((torch.tensor([np.nan]), torch.diagonal(phi, offset=-1)))
     
     ns = torch.stack([n1, n2, n3, n4, n5], dim=1)
     
@@ -448,8 +448,13 @@ def get_k_neighbors(dist, k):
         Tensor with indices of nearest neighbors for node
     """
     E_idx = []
-    for i in range(len(dist)):
-        E_idx.append(get_k_neighbors_idx(dist[i,:], k))
+    if not isinstance(dist, int):
+        for i in range(len(dist)):
+            E_idx.append(get_k_neighbors_idx(dist[i,:], k))
+    else:
+        for i in range(dist):
+            E_idx.append(get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(dist)))-i),k+1)[1:])
+    
     return torch.stack(E_idx)
 
 
@@ -507,7 +512,7 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
     return torch.stack(E, dim=2)
 
 
-def get_mask(E):
+def get_mask(E, V):
     """
     Get mask to hide node with missing features
 
@@ -521,7 +526,9 @@ def get_mask(E):
     * : torch.Tensor, (L)
         mask to hide nodes with missing features
     """
-    return torch.tensor(np.isfinite(np.sum(np.array(E),(1,2))).astype(np.float32))
+    mask_E = torch.tensor(np.isfinite(np.sum(np.array(E),-1)).astype(np.float32)).view(E.shape[0], E.shape[1], 1)
+    mask_V = torch.tensor(np.isfinite(np.sum(np.array(V),-1)).astype(np.float32)).view(1,-1)
+    return mask_V, mask_E
 
 
 def replace_nan(E):
@@ -541,25 +548,6 @@ def replace_nan(E):
     isnan = np.isnan(E)
     E[isnan] = 0.
     return E
-
-
-def get_S_enc(seq, tokenizer):
-    """
-    One-hot-encode sequence
-
-    Parameters:
-    -----------
-    seq : str
-        protein sequence
-
-    tokenizer : object
-
-    Returns:
-    --------
-    * : torch.Tensor, (1,L)
-        One-hot-encoded sequence
-    """
-    return torch.tensor(tokenizer.tokenize(seq))
 
 
 class Struct2SeqDecoder(nn.Module):
@@ -594,7 +582,7 @@ class Struct2SeqDecoder(nn.Module):
     """
     def __init__(self, num_letters, node_features, edge_features,
         hidden_dim, num_encoder_layers=3, num_decoder_layers=3,
-        vocab=20, dropout=0.1, forward_attention_decoder=True, use_mpnn=False):
+        vocab=20, dropout=0.1, use_mpnn=False):
         
         """
         Parameters:
@@ -651,7 +639,6 @@ class Struct2SeqDecoder(nn.Module):
         ])
 
         # Decoder layers
-        self.forward_attention_decoder = forward_attention_decoder
         self.decoder_layers = nn.ModuleList([
             layer(hidden_dim, hidden_dim*3, dropout=dropout)
             for _ in range(num_decoder_layers)
@@ -671,7 +658,7 @@ class Struct2SeqDecoder(nn.Module):
         mask = mask.type(torch.float32)
         return mask
 
-    def forward(self, V, E, E_idx, S, L, mask):
+    def forward(self, V, E, E_idx, S, mask_V, mask_E):
         """
         Parameters:
         -----------
@@ -702,9 +689,8 @@ class Struct2SeqDecoder(nn.Module):
         # Prepare node and edge embeddings
 #         V, E, E_idx = self.features(X, L, mask)
         if V is None:
-            h_V = torch.zeros(S.shape[0], S.shape[1], 128).float()
-            h_E = torch.zeros(S.shape[0], S.shape[1], 1, 128).float()
-            E_idx = torch.from_numpy(np.array([1] + list(range(0,139))).reshape(S.shape[0],S.shape[1],1)).long()
+            h_V = torch.zeros(S.shape[0], S.shape[1], self.hidden_dim).float()
+            h_E = torch.zeros(S.shape[0], S.shape[1], 1, self.hidden_dim).float()
         else:
             h_V = self.W_v(V)
             h_E = self.W_e(E)
@@ -732,27 +718,20 @@ class Struct2SeqDecoder(nn.Module):
         mask_bw : applies both masks together
         """
         mask_attend = self._autoregressive_mask(E_idx).unsqueeze(-1)
-        mask_1D = mask.view([mask.size(0), mask.size(1), 1, 1])
-        mask_bw = mask_1D * mask_attend
+        mask_1D = mask_V.view([mask_V.size(0), mask_V.size(1), 1, 1])
+        mask_bw = mask_1D * mask_E * mask_attend
         
-        if self.forward_attention_decoder:
-            """
-            mask_fw : basically opposite of mask_bw
-            """
-            mask_fw = mask_1D * (1. - mask_attend)
-            h_ESV_encoder_fw = mask_fw * h_ESV_encoder
-        else:
-            h_ESV_encoder_fw = 0
-        
+        mask_fw = mask_1D * (1. - mask_attend)
+        h_ESV_encoder_fw = mask_fw * h_ESV_encoder
         
         for layer in self.decoder_layers:
             # Masked positions attend to encoder information, unmasked see. 
             h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
             h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw
-            h_V = layer(h_V, h_ESV, mask_V=mask)
+            h_V = layer(h_V, h_ESV, mask_V=mask_V)
         
         logits = self.W_out(h_V) 
         log_probs = F.log_softmax(logits, dim=-1)
-        return log_probs
+        return log_probs, h_V
 
     
