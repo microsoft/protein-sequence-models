@@ -210,13 +210,16 @@ class AncestorCollater(LMCollater):
 class MLMCollater(SimpleCollater):
 
     def _prep(self, sequences):
-        tgt = sequences[:]
+        tgt = list(sequences[:])
         src = []
         mask = []
         for seq in sequences:
+            if len(seq) == 0:
+                tgt.remove(seq)
+                continue
             mod_idx = random.sample(list(range(len(seq))), int(len(seq) * 0.15))
             if len(mod_idx) == 0:
-                mod_idx = [np.random.choice(list(range(len(seq))))]  # make sure at least one aa is chosen
+                mod_idx = [np.random.choice(len(seq))]  # make sure at least one aa is chosen
             seq_mod = list(seq)
             for idx in mod_idx:
                 p = np.random.uniform()
