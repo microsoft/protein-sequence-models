@@ -3,6 +3,8 @@ import random
 import math
 import subprocess
 import string
+import json
+from os import path
 
 import numpy as np
 import torch
@@ -12,6 +14,44 @@ import pandas as pd
 from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD, START, STOP, MASK
 from sequence_models.constants import ALL_AAS, trR_ALPHABET
+
+
+class UniRefDataset(Dataset):
+    """
+    Dataset that pulls from UniRef/Uniclust downloads.
+
+    The data folder should contain the following:
+    - 'consensus.fasta': consensus sequences, no line breaks in sequences
+    - 'splits.json': a dict with keys 'train', 'valid', and 'test' mapping to lists of indices
+    - 'lengths_and_offsets.npz': byte offsets for the 'consensus.fasta' and sequence lengths
+    """
+
+    def __init__(self, data_dir: str, split: str, structure: bool=False):
+        self.data_dir = data_dir
+        self.split = split
+        self.structure = structure
+        with open(data_dir + 'splits.json', 'r') as f:
+            self.indices = json.load(f)[self.split]
+        metadata = np.load(self.data_dir + 'lengths_and_offsets.npz')
+        self.offsets = metadata['seq_offsets']
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        idx = self.indices[idx]
+        offset = self.offsets[idx]
+        with open(self.data_dir + 'consensus.fasta') as f:
+            f.seek(offset)
+            consensus = f.readline()[:-1]
+        if self.structure:
+            fname = self.data_dir + 'structures/%08d.npz' %idx
+            if path.isfile(fname):
+                structure = np.load(fname)
+                return consensus, structure
+            else:
+                return consensus, None
+        return (consensus, )
 
 
 class FFDataset(Dataset):
