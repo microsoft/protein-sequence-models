@@ -37,6 +37,24 @@ class MaskedAccuracy(object):
         return torch.mean((p == masked_tgt).float())
 
 
+class MaskedTopkAccuracy(object):
+    """Masked top k accuracy.
+
+    Inputs:
+        pred (N, L, C)
+        tgt (N, L)
+        mask (N, L)
+        k (int)
+    """
+
+    def __call__(self, pred, tgt, mask, k):
+        _, p = torch.topk(pred, k, -1)
+        masked_tgt = torch.masked_select(tgt, mask.bool())
+        p = torch.masked_select(p, mask.bool().unsqueeze(-1)).view(-1, k)
+        masked_tgt = masked_tgt.repeat(k).view(k, -1).t()
+        return (p == masked_tgt).float().sum(dim=1).mean()
+
+
 class UngappedAccuracy(MaskedAccuracy):
 
     def __init__(self, gap_index):
