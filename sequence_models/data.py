@@ -14,6 +14,7 @@ import pandas as pd
 from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD, START, STOP, MASK
 from sequence_models.constants import ALL_AAS, trR_ALPHABET
+from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
 
 
 class UniRefDataset(Dataset):
@@ -241,6 +242,50 @@ class MLMCollater(SimpleCollater):
         tgt = _pad(tgt, pad_idx)
         mask = _pad(mask, 0)
         return src, tgt, mask
+
+
+class StructureCollater(object):
+
+    def __init__(self, sequence_collater: SimpleCollater, p_drop_structure=0.1, n_connections=20):
+        self.sequence_collater = sequence_collater
+        self.p_drop = p_drop_structure
+        self.n_connections = n_connections
+
+    def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
+        sequences, structures = tuple(zip(*batch))
+        collated_seqs = self.sequence_collater._prep(sequences)
+        ells = [len(s) for s in sequences]
+        max_ell = max(ells) + 1
+        n = len(sequences)
+        nodes = torch.zeros(n, max_ell, 10)
+        edges = torch.zeros(n, max_ell, self.n_connections, 6)
+        connections = torch.zeros(n, max_ell, self.n_connections, dtype=torch.long)
+        edge_mask = torch.zeros(n, max_ell, self.n_connections, 1)
+        for i, (ell, structure) in enumerate(zip(ells, structures)):
+            if structure is None:
+                continue
+            if np.random.random() < self.p_drop:
+                continue
+            # load features
+            ## TODO: Check the ordering
+            dist = torch.from_numpy(structure['0']).float()
+            omega = torch.from_numpy(structure['1']).float()
+            theta = torch.from_numpy(structure['2']).float()
+            phi = torch.from_numpy(structure['3']).float()
+            # process features
+            V = get_node_features(omega, theta, phi)
+            E_idx = get_k_neighbors(dist, self.n_connections)
+            E = get_edge_features(dist, omega, theta, phi, E_idx)
+            str_mask = get_mask(E)
+            E = replace_nan(E)
+            # reshape
+            nc = min(ell, self.n_connections)
+            nodes[i, 1: ell + 1] = V
+            edges[i, 1: ell + 1, :nc] = E
+            connections[i, 1: ell + 1, :nc] = E_idx
+            str_mask = str_mask.view(1, ell, -1)
+            edge_mask[i, 1: ell + 1, :nc, 0] = str_mask
+        return (*collated_seqs, nodes, edges, connections, edge_mask)
 
 
 class SortishSampler(Sampler):
