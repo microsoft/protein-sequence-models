@@ -369,6 +369,56 @@ class NeighborAttention(nn.Module):
 
 
 ######################## OUR METHODS ########################
+
+def argmax2value(array, bins, symmetric=False):
+    """
+    Convert argmax trRosetta outputs to real values
+    """
+    processed = np.zeros(array.shape)
+    if symmetric:
+        for i in range(len(array)):
+            for j in range(i+1):
+                argmax_val = array[i,j]
+                if argmax_val != 0:
+                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val+1])
+                processed[i,j] = argmax_val
+                processed[j,i] = argmax_val
+                
+    else:  
+        for i in range(len(array)):
+            for j in range(len(array)):
+                argmax_val = array[i,j]
+                if argmax_val != 0:
+                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val+1])
+                processed[i,j] = argmax_val
+                
+    return processed
+
+
+def load_npz(path):
+    """
+    Preprocess trRosetta output
+    """
+    data = np.load(path)
+    
+    dist = data['0']
+    theta = data['1']
+    phi = data['2']
+    omega = data['3']
+
+    # bins from trRosetta paper
+    dist_bins = np.concatenate([np.array([np.nan]), np.linspace(2,20,37)])
+    theta_bins = np.concatenate([np.array([np.nan]), np.linspace(0,360, 25)])
+    phi_bins = np.concatenate([np.array([np.nan]), np.linspace(0,180, 13)])
+    omega_bins = np.concatenate([np.array([np.nan]), np.linspace(0,360, 25)])
+    
+    # process
+    dist = argmax2value(dist, dist_bins, symmetric=True)
+    theta = argmax2value(theta, theta_bins, symmetric=False)
+    phi = argmax2value(phi, phi_bins, symmetric=False)
+    omega = argmax2value(omega, omega_bins, symmetric=True)
+        
+    return dist, omega, theta, phi
     
 
 def get_node_features(omega, theta, phi):
