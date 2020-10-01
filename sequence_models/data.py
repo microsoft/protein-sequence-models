@@ -3,6 +3,8 @@ import random
 import math
 import subprocess
 import string
+import json
+from os import path
 
 import numpy as np
 import torch
@@ -12,17 +14,58 @@ import pandas as pd
 from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD, START, STOP, MASK
 from sequence_models.constants import ALL_AAS, trR_ALPHABET
+from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
+
+
+class UniRefDataset(Dataset):
+    """
+    Dataset that pulls from UniRef/Uniclust downloads.
+
+    The data folder should contain the following:
+    - 'consensus.fasta': consensus sequences, no line breaks in sequences
+    - 'splits.json': a dict with keys 'train', 'valid', and 'test' mapping to lists of indices
+    - 'lengths_and_offsets.npz': byte offsets for the 'consensus.fasta' and sequence lengths
+    """
+
+    def __init__(self, data_dir: str, split: str, structure: bool=False):
+        self.data_dir = data_dir
+        self.split = split
+        self.structure = structure
+        with open(data_dir + 'splits.json', 'r') as f:
+            self.indices = json.load(f)[self.split]
+        metadata = np.load(self.data_dir + 'lengths_and_offsets.npz')
+        self.offsets = metadata['seq_offsets']
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        idx = self.indices[idx]
+        offset = self.offsets[idx]
+        with open(self.data_dir + 'consensus.fasta') as f:
+            f.seek(offset)
+            consensus = f.readline()[:-1]
+        if self.structure:
+            fname = self.data_dir + 'structures/%08d.npz' %idx
+            if path.isfile(fname):
+                structure = np.load(fname)
+                return consensus, structure
+            else:
+                return consensus, None
+        return (consensus, )
 
 
 class FFDataset(Dataset):
 
-    def __init__(self, stem):
+    def __init__(self, stem, max_len=np.inf, tr_only=True):
         self.index = stem + 'ffindex'
         self.data = stem + 'ffdata'
         result = subprocess.run(['wc', '-l', self.index], stdout=subprocess.PIPE)
         self.length = int(result.stdout.decode('utf-8').split(' ')[0])
         self.tokenizer = Tokenizer(trR_ALPHABET)
         self.table = str.maketrans(dict.fromkeys(string.ascii_lowercase))
+        self.max_len = max_len
+        self.tr_only = tr_only
 
     def __len__(self):
         return self.length
@@ -34,10 +77,16 @@ class FFDataset(Dataset):
         seqs = []
         for line in a3m.split('\n'):
             # skip labels
-            if len(line) > 0 and line[0] != '>':
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            if line[0] != '>':
                 # remove lowercase letters and right whitespaces
                 s = line.rstrip().translate(self.table)
-                if len(s) > 900:
+                if self.tr_only:
+                    s = ''.join([a if a in trR_ALPHABET else '-' for a in s])
+                if len(s) > self.max_len:
                     return torch.tensor([])
                 seqs.append(s)
         seqs = torch.tensor([self.tokenizer.tokenize(s) for s in seqs])
@@ -162,13 +211,16 @@ class AncestorCollater(LMCollater):
 class MLMCollater(SimpleCollater):
 
     def _prep(self, sequences):
-        tgt = sequences[:]
+        tgt = list(sequences[:])
         src = []
         mask = []
         for seq in sequences:
+            if len(seq) == 0:
+                tgt.remove(seq)
+                continue
             mod_idx = random.sample(list(range(len(seq))), int(len(seq) * 0.15))
             if len(mod_idx) == 0:
-                mod_idx = [np.random.choice(list(range(len(seq))))]  # make sure at least one aa is chosen
+                mod_idx = [np.random.choice(len(seq))]  # make sure at least one aa is chosen
             seq_mod = list(seq)
             for idx in mod_idx:
                 p = np.random.uniform()
@@ -190,6 +242,50 @@ class MLMCollater(SimpleCollater):
         tgt = _pad(tgt, pad_idx)
         mask = _pad(mask, 0)
         return src, tgt, mask
+
+
+class StructureCollater(object):
+
+    def __init__(self, sequence_collater: SimpleCollater, p_drop_structure=0.1, n_connections=20):
+        self.sequence_collater = sequence_collater
+        self.p_drop = p_drop_structure
+        self.n_connections = n_connections
+
+    def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
+        sequences, structures = tuple(zip(*batch))
+        collated_seqs = self.sequence_collater._prep(sequences)
+        ells = [len(s) for s in sequences]
+        max_ell = max(ells) + 1
+        n = len(sequences)
+        nodes = torch.zeros(n, max_ell, 10)
+        edges = torch.zeros(n, max_ell, self.n_connections, 6)
+        connections = torch.zeros(n, max_ell, self.n_connections, dtype=torch.long)
+        edge_mask = torch.zeros(n, max_ell, self.n_connections, 1)
+        for i, (ell, structure) in enumerate(zip(ells, structures)):
+            if structure is None:
+                continue
+            if np.random.random() < self.p_drop:
+                continue
+            # load features
+            ## TODO: Check the ordering
+            dist = torch.from_numpy(structure['0']).float()
+            omega = torch.from_numpy(structure['1']).float()
+            theta = torch.from_numpy(structure['2']).float()
+            phi = torch.from_numpy(structure['3']).float()
+            # process features
+            V = get_node_features(omega, theta, phi)
+            E_idx = get_k_neighbors(dist, self.n_connections)
+            E = get_edge_features(dist, omega, theta, phi, E_idx)
+            str_mask = get_mask(E)
+            E = replace_nan(E)
+            # reshape
+            nc = min(ell, self.n_connections)
+            nodes[i, 1: ell + 1] = V
+            edges[i, 1: ell + 1, :nc] = E
+            connections[i, 1: ell + 1, :nc] = E_idx
+            str_mask = str_mask.view(1, ell, -1)
+            edge_mask[i, 1: ell + 1, :nc, 0] = str_mask
+        return (*collated_seqs, nodes, edges, connections, edge_mask)
 
 
 class SortishSampler(Sampler):
