@@ -188,7 +188,9 @@ class MPNNLayer(nn.Module):
         """
 
         # Concatenate h_V_i to h_E_ij
-        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2),-1)
+        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2), -1)
+        if h_V_expand.dtype == torch.half:
+            h_E = h_E.half()
         h_EV = torch.cat([h_V_expand, h_E], -1)
 
         h_message = self.W3(F.relu(self.W2(F.relu(self.W1(h_EV)))))
@@ -411,11 +413,11 @@ def get_node_features(omega, theta, phi):
 
 def get_k_neighbors_idx(array, k):
     """
-    Find k nearest neighbors for a node
+    Find k nearest neighbors for a node.
 
     Parameters:
     -----------
-    array : torch.Tensor, (L,L)
+    array : torch.Tensor, (L, )
         distance matrix
 
     k : int
@@ -426,7 +428,8 @@ def get_k_neighbors_idx(array, k):
     * : torch.Tensor, (1,k)
         Tensor with indices of nearest neighbors for node
     """
-
+    if k > len(array):
+        return torch.arange(len(array))
     return torch.topk(array, k, largest=False)[1]
 
 
@@ -449,6 +452,8 @@ def get_k_neighbors(dist, k):
     """
     E_idx = []
     if not isinstance(dist, int):
+        ell = len(dist)
+        k = min(k, ell)
         for i in range(len(dist)):
             val, idx = torch.topk(dist[i], len(dist), largest=False)
             idx_temp = torch.where(torch.isnan(val)*1 == 0)[0]
@@ -457,17 +462,15 @@ def get_k_neighbors(dist, k):
                 rem = k - len(E_idx_temp)
                 closest = get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(len(dist))))-i),
                     len(dist))[1:]
-                closest = torch.tensor([i.item() for i in closest if i not in E_idx_temp][:rem])
+                closest = torch.tensor([i.item() for i in closest if i not in E_idx_temp][:rem]).long()
                 E_idx_temp = torch.cat([E_idx_temp, closest])
             else:
                 E_idx_temp = E_idx_temp[:k]
             E_idx.append(E_idx_temp)
     else:
         for i in range(dist):
-            E_idx.append(get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(dist)))-i),k+1)[1:])
+            E_idx.append(get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(dist)))-i), k+1)[1:])
     return torch.stack(E_idx)
-
-
 
 
 def get_edge_features(dist, omega, theta, phi, E_idx):
@@ -488,7 +491,7 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
     phi : torch.Tensor, (L, L)
         phi angles
 
-    E_idx : torch.Tensor (L, k_neighbors)
+    connections : torch.Tensor (L, k_neighbors)
         indicies of k nearest neighbors of each node
 
     Returns:
@@ -530,7 +533,7 @@ def get_mask(E):
 
     Parameters:
     -----------
-    E : torch.Tensor, (L, k_neighbors, 6)
+    edges : torch.Tensor, (L, k_neighbors, 6)
         edge features
 
     Returns:
@@ -538,9 +541,9 @@ def get_mask(E):
     * : torch.Tensor, (L)
         mask to hide nodes with missing features
     """
-    mask_E = torch.tensor(np.isfinite(np.sum(np.array(E),-1)).astype(np.float32)).view(E.shape[0], E.shape[1], 1)
-    # mask_V = torch.tensor(np.isfinite(np.sum(np.array(V),-1)).astype(np.float32)).view(1,-1)
-    # return mask_V, mask_E
+    mask_E = torch.tensor(np.isfinite(np.sum(np.array(E), -1)).astype(np.float32)).view(E.shape[0], E.shape[1], 1)
+    # mask_V = torch.tensor(np.isfinite(np.sum(np.array(nodes),-1)).astype(np.float32)).view(1,-1)
+    # return mask_V, edge_mask
     return mask_E
 
 
@@ -550,15 +553,15 @@ def replace_nan(E):
 
     Parameters:
     -----------
-    E : torch.Tensor, (L, k_neighbors, 6)
+    edges : torch.Tensor, (L, k_neighbors, 6)
         Edge features
 
     Returns:
     --------
-    E : torch.Tensor, (L, k_neighbors, 6)
+    edges : torch.Tensor, (L, k_neighbors, 6)
         Edge features with imputed missing data
     """
-    isnan = np.isnan(E)
+    isnan = np.isnan(E).bool()
     E[isnan] = 0.
     return E
 
@@ -579,29 +582,28 @@ class Struct2SeqDecoder(nn.Module):
     Example:
         # preprocessing
         # load in features dist, omega, theta, and phi
-        V = get_node_features(omega, theta, phi)
-        E_idx = get_k_neighbors(dist, 10)
-        E = get_edge_features(dist, omega, theta, phi, E_idx)
-        mask = get_mask(E)
-        E = replace_nan(E)
+        nodes = get_node_features(omega, theta, phi)
+        connections = get_k_neighbors(dist, 10)
+        edges = get_edge_features(dist, omega, theta, phi, connections)
+        mask = get_mask(edges)
+        edges = replace_nan(edges)
         L = len(seq)
-        S = get_S_enc(seq, tokenizer)
+        src = get_S_enc(seq, tokenizer)
 
         model = Struct2SeqDecoder(num_letters=20, node_features=10,
                     edge_features=6, hidden_dim=16)
 
-        outputs = model(V, E, E_idx, S, L, mask)
+        outputs = model(nodes, edges, connections, src, L, mask)
 
     """
     def __init__(self, num_letters, node_features, edge_features,
-        hidden_dim, num_encoder_layers=3, num_decoder_layers=3,
-        vocab=20, dropout=0.1, use_mpnn=False):
+                 hidden_dim, num_decoder_layers=3, dropout=0.1, use_mpnn=False):
         
         """
         Parameters:
         -----------
         num_letters : int
-            len of protein alphabet, for output dimension
+            len of protein alphabet
 
         node_features : int
             number of node features
@@ -617,9 +619,6 @@ class Struct2SeqDecoder(nn.Module):
         
         num_decoder_layers : int
             number of decoder layers
-
-        vocab : int
-            len of protein alphabet
 
         dropout : float
             dropout
@@ -642,14 +641,8 @@ class Struct2SeqDecoder(nn.Module):
         # Embedding layers
         self.W_v = nn.Linear(node_features, hidden_dim, bias=True)
         self.W_e = nn.Linear(edge_features, hidden_dim, bias=True)
-        self.W_s = nn.Embedding(vocab, hidden_dim)
+        self.W_s = nn.Embedding(num_letters, hidden_dim)
         layer = TransformerLayer if not use_mpnn else MPNNLayer
-
-        # Encoder layers
-        self.encoder_layers = nn.ModuleList([
-            layer(hidden_dim, hidden_dim*2, dropout=dropout)
-            for _ in range(num_encoder_layers)
-        ])
 
         # Decoder layers
         self.decoder_layers = nn.ModuleList([
@@ -663,34 +656,34 @@ class Struct2SeqDecoder(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def _autoregressive_mask(self, E_idx):
-        N_nodes = E_idx.size(1)
-        ii = torch.arange(N_nodes)
+    def _autoregressive_mask(self, connections):
+        N_nodes = connections.size(1)
+        ii = torch.arange(N_nodes, device=connections.device)
         ii = ii.view((1, -1, 1))
-        mask = E_idx - ii < 0
+        mask = connections - ii < 0
         mask = mask.type(torch.float32)
         return mask
 
-    def forward(self, V, E, E_idx, S, mask_E):
+    def forward(self, nodes, edges, connections, src, edge_mask):
         """
         Parameters:
         -----------
-        V : torch.Tensor, (N_batch, L, in_channels)
+        nodes : torch.Tensor, (N_batch, L, in_channels)
             Node features
 
-        E : torch.Tensor, (N_batch, L, K_neighbors, in_channels) 
+        edges : torch.Tensor, (N_batch, L, K_neighbors, in_channels)
             Edge features 
 
-        E_idx : torch.Tensor, (N_batch, L, K_neighbors)
+        connections : torch.Tensor, (N_batch, L, K_neighbors)
             Node neighbors 
 
-        S : torch.Tensor, (N_batch, L)
+        src : torch.Tensor, (N_batch, L)
             One-hot-encoded sequences
 
         L : array-like, (N_batch)
             Lengths of sequences
 
-        mask : torch.Tensor, (N_batch, L)
+        edge_mask : torch.Tensor, (N_batch, L, k_neighbors)
             Mask to hide nodes with missing features
 
         Returns:
@@ -700,29 +693,16 @@ class Struct2SeqDecoder(nn.Module):
         """
         
         # Prepare node and edge embeddings
-#         V, E, E_idx = self.features(X, L, mask)
-        if V is None:
-            h_V = torch.zeros(S.shape[0], S.shape[1], self.hidden_dim).float()
-            h_E = torch.zeros(S.shape[0], S.shape[1], 1, self.hidden_dim).float()
-        else:
-            h_V = self.W_v(V)
-            h_E = self.W_e(E)
-#         print('h_E: ', h_E.shape)
-
-        # Encoder is unmasked self-attention # SKIP
-#         mask_attend = gather_nodes(mask.unsqueeze(-1),  E_idx).squeeze(-1)
-#         mask_attend = mask.unsqueeze(-1) * mask_attend
-#         for layer in self.encoder_layers:
-#             h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-#             h_V = layer(h_V, h_EV, mask_V=mask, mask_attend=mask_attend)
+        h_V = self.W_v(nodes)
+        h_E = self.W_e(edges)
 
         # Concatenate sequence embeddings for autoregressive decoder
-        h_S = self.W_s(S)
-        h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
+        h_S = self.W_s(src)
+        h_ES = cat_neighbors_nodes(h_S, h_E, connections)
 
         # Build encoder embeddings
-        h_ES_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, E_idx)
-        h_ESV_encoder = cat_neighbors_nodes(h_V, h_ES_encoder, E_idx)
+        h_ES_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)
+        h_ESV_encoder = cat_neighbors_nodes(h_V, h_ES_encoder, connections)
 
         # Decoder uses masked self-attention
         """
@@ -730,23 +710,22 @@ class Struct2SeqDecoder(nn.Module):
         mask : input mask, to mask the nodes/edges with nan values 
         mask_bw : applies both masks together
         """
-        mask_attend = self._autoregressive_mask(E_idx).unsqueeze(-1)
+        mask_attend = self._autoregressive_mask(connections).unsqueeze(-1)
         # mask_1D = mask_V.view([mask_V.size(0), mask_V.size(1), 1, 1])
-        # mask_bw = mask_1D * mask_E * mask_attend
-        mask_bw = mask_E * mask_attend
+        # mask_bw = mask_1D * edge_mask * mask_attend
+        mask_bw = edge_mask * mask_attend
         
         # mask_fw = mask_1D * (1. - mask_attend)
-        mask_fw = mask_E * (1. - mask_attend)
+        mask_fw = edge_mask * (1. - mask_attend)
         h_ESV_encoder_fw = mask_fw * h_ESV_encoder
         
         for layer in self.decoder_layers:
             # Masked positions attend to encoder information, unmasked see. 
-            h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
+            h_ESV = cat_neighbors_nodes(h_V, h_ES, connections)
             h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw
             h_V = layer(h_V, h_ESV, mask_V=None)
         
         logits = self.W_out(h_V) 
-        log_probs = F.log_softmax(logits, dim=-1)
-        return log_probs
+        return logits
 
     
