@@ -422,7 +422,8 @@ def load_npz(path):
     phi = argmax2value(phi, phi_bins, symmetric=False)
     omega = argmax2value(omega, omega_bins, symmetric=True)
         
-    return dist, omega, theta, phi
+    return torch.tensor(dist), torch.tensor(omega), \
+        torch.tensor(theta), torch.tensor(phi)
     
 
 def get_node_features(omega, theta, phi):
@@ -463,66 +464,21 @@ def get_node_features(omega, theta, phi):
     return torch.cat([torch.sin(ns), torch.cos(ns)], dim=1)
     
 
-def get_k_neighbors_idx(array, k):
-    """
-    Find k nearest neighbors for a node.
-
-    Parameters:
-    -----------
-    array : torch.Tensor, (L, )
-        distance matrix
-
-    k : int
-        number of neighbors  
-
-    Returns:
-    -------- 
-    * : torch.Tensor, (1,k)
-        Tensor with indices of nearest neighbors for node
-    """
-    if k > len(array):
-        return torch.arange(len(array))
-    return torch.topk(array, k, largest=False)[1]
-
-
 def get_k_neighbors(dist, k):
-    """
-    Find k nearest neighbors for all nodes in a sequence
-
-    Parameters:
-    -----------
-    dist : torch.Tensor, (L,L) 
-        distance matrix
-
-    k : int
-        number of neighbors
-
-    Returns:
-    --------
-    * : torch.Tensor, (L, k)
-        Tensor with indices of nearest neighbors for node
-    """
-    E_idx = []
     if not isinstance(dist, int):
-        ell = len(dist)
-        k = min(k, ell)
-        for i in range(len(dist)):
-            val, idx = torch.topk(dist[i], len(dist), largest=False)
-            idx_temp = torch.where(torch.isnan(val)*1 == 0)[0]
-            E_idx_temp = idx[idx_temp]
-            if len(E_idx_temp) < k:
-                rem = k - len(E_idx_temp)
-                closest = get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(len(dist))))-i),
-                    len(dist))[1:]
-                closest = torch.tensor([i.item() for i in closest if i not in E_idx_temp][:rem]).long()
-                E_idx_temp = torch.cat([E_idx_temp, closest])
-            else:
-                E_idx_temp = E_idx_temp[:k]
-            E_idx.append(E_idx_temp)
+        k = min(k, len(dist)-1)
+        val, idx = torch.topk(dist, k, largest=False)
+        return idx
     else:
-        for i in range(dist):
-            E_idx.append(get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(dist)))-i), k+1)[1:])
-    return torch.stack(E_idx)
+        k = min(k, dist-1)
+        # create synthetic distance matrix based on distance of primary structure
+        syn_dist = torch.abs(torch.Tensor(list(range(dist))).repeat(dist,1) - \
+                             torch.Tensor(list(range(dist))).view(-1,1))
+        
+        val, idx = torch.topk(syn_dist, k+1, largest=False)
+        
+        # take idx[:,1:] to skip self node
+        return idx[:,1:]
 
 
 def get_edge_features(dist, omega, theta, phi, E_idx):
