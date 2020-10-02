@@ -1,6 +1,8 @@
 import pathlib
 import os
 
+import numpy as np
+
 home = os.getenv('PT_DATA_DIR')
 if home is None:
     home = str(pathlib.Path.home())
@@ -34,5 +36,11 @@ IUPAC_SS = 'HSTC'
 DSSP = 'GHITEBSC'
 SS8 = DSSP
 SS3 = 'HSL'  # H: GHI; S: EB; L: STC
+
+# Bins from TrRosetta paper
+DIST_BINS = np.concatenate([np.array([np.nan]), np.linspace(2, 20, 37)])
+THETA_BINS = np.concatenate([np.array([np.nan]), np.linspace(0, 360, 25)])
+PHI_BINS = np.concatenate([np.array([np.nan]), np.linspace(0, 180, 13)])
+OMEGA_BINS = np.concatenate([np.array([np.nan]), np.linspace(0, 360, 25)])
 
 

@@ -2,11 +2,12 @@
 from __future__ import print_function
 
 import numpy as np
-from matplotlib import pyplot as plt
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from sequence_models.constants import DIST_BINS, THETA_BINS, PHI_BINS, OMEGA_BINs
 
 ######################## UTILS FROM ORIGINAL PAPER ########################
 
@@ -400,53 +401,27 @@ def argmax2value(array, bins, symmetric=False):
     return processed
 
 
-def load_npz(dist_bins, theta_bins, phi_bins, omega_bins, path=None, L=None):
-    """
-    From paper
-    dist_bins = np.concatenate([np.array([np.nan]), np.linspace(2,20,37)])
-    theta_bins = np.concatenate([np.array([np.nan]), np.linspace(0,360, 25)])
-    phi_bins = np.concatenate([np.array([np.nan]), np.linspace(0,180, 13)])
-    omega_bins = np.concatenate([np.array([np.nan]), np.linspace(0,360, 25)])
-    
+def bins_to_vals(data=None, L=None):
+    """ Convert from trRosetta predictions to actual numbers.
     Parameters:
     -----------
-    dist_bins : array-like
-    
-    theta_bins : array_like
-    
-    phi_bins : array_like 
-    
-    omega_bins : array_like 
-    
-    path = str
-        path to npz file storing argmax vals
-    
+    data = dict-like
     L = int
-        if path is None, set dim of distance matrix using
-        
+        if preds is None, set dim of distance matrix using L
     """
-    if path is not None:
-        data = np.load(path)
-
+    if data is not None:
         dist = data['0']
         theta = data['1']
         phi = data['2']
         omega = data['3']
-
-        # process dist
-        dist = argmax2value(dist, dist_bins, symmetric=True)
-        theta = argmax2value(theta, theta_bins, symmetric=False)
-        phi = argmax2value(phi, phi_bins, symmetric=False)
-        omega = argmax2value(omega, omega_bins, symmetric=True)
-
+        dist = argmax2value(dist, DIST_BINS, symmetric=True)
+        theta = argmax2value(theta, THETA_BINS, symmetric=False)
+        phi = argmax2value(phi, PHI_BINS, symmetric=False)
+        omega = argmax2value(omega, OMEGA_BINs, symmetric=True)
         return dist, omega, theta, phi
-    
     else:
-        syn_dist = torch.abs(torch.Tensor(list(range(L))).repeat(L,1) - \
-                             torch.Tensor(list(range(L))).view(-1,1))
-        
-        syn_dist[syn_dist==0.0] = np.nan
-        
+        syn_dist = np.abs(np.arange(L)[None, :].repeat(L, axis=0) - np.arange(L).reshape(-1, 1))
+        syn_dist[syn_dist == 0.0] = np.nan
         return syn_dist
     
 
