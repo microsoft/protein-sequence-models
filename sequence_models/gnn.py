@@ -371,6 +371,83 @@ class NeighborAttention(nn.Module):
 
 
 ######################## OUR METHODS ########################
+
+def argmax2value(array, bins, symmetric=False):
+    processed = np.zeros(array.shape)
+    if symmetric:
+        for i in range(len(array)):
+            for j in range(i+1):
+                argmax_val = array[i,j]
+                if argmax_val != 0:
+                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val+1])
+                else:
+                    argmax_val = bins[argmax_val]
+                    
+                processed[i,j] = argmax_val
+                processed[j,i] = argmax_val
+                
+    else:  
+        for i in range(len(array)):
+            for j in range(len(array)):
+                argmax_val = array[i,j]
+                if argmax_val != 0:
+                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val+1])
+                else:
+                    bins[argmax_val]
+                    
+                processed[i,j] = argmax_val
+                
+    return processed
+
+
+def load_npz(dist_bins, theta_bins, phi_bins, omega_bins, path=None, L=None):
+    """
+    From paper
+    dist_bins = np.concatenate([np.array([np.nan]), np.linspace(2,20,37)])
+    theta_bins = np.concatenate([np.array([np.nan]), np.linspace(0,360, 25)])
+    phi_bins = np.concatenate([np.array([np.nan]), np.linspace(0,180, 13)])
+    omega_bins = np.concatenate([np.array([np.nan]), np.linspace(0,360, 25)])
+    
+    Parameters:
+    -----------
+    dist_bins : array-like
+    
+    theta_bins : array_like
+    
+    phi_bins : array_like 
+    
+    omega_bins : array_like 
+    
+    path = str
+        path to npz file storing argmax vals
+    
+    L = int
+        if path is None, set dim of distance matrix using
+        
+    """
+    if path is not None:
+        data = np.load(path)
+
+        dist = data['0']
+        theta = data['1']
+        phi = data['2']
+        omega = data['3']
+
+        # process dist
+        dist = argmax2value(dist, dist_bins, symmetric=True)
+        theta = argmax2value(theta, theta_bins, symmetric=False)
+        phi = argmax2value(phi, phi_bins, symmetric=False)
+        omega = argmax2value(omega, omega_bins, symmetric=True)
+
+        return dist, omega, theta, phi
+    
+    else:
+        syn_dist = torch.abs(torch.Tensor(list(range(L))).repeat(L,1) - \
+                             torch.Tensor(list(range(L))).view(-1,1))
+        
+        syn_dist[syn_dist==0.0] = np.nan
+        
+        return syn_dist
     
 
 def get_node_features(omega, theta, phi):
@@ -411,66 +488,10 @@ def get_node_features(omega, theta, phi):
     return torch.cat([torch.sin(ns), torch.cos(ns)], dim=1)
     
 
-def get_k_neighbors_idx(array, k):
-    """
-    Find k nearest neighbors for a node.
-
-    Parameters:
-    -----------
-    array : torch.Tensor, (L, )
-        distance matrix
-
-    k : int
-        number of neighbors  
-
-    Returns:
-    -------- 
-    * : torch.Tensor, (1,k)
-        Tensor with indices of nearest neighbors for node
-    """
-    if k > len(array):
-        return torch.arange(len(array))
-    return torch.topk(array, k, largest=False)[1]
-
-
 def get_k_neighbors(dist, k):
-    """
-    Find k nearest neighbors for all nodes in a sequence
-
-    Parameters:
-    -----------
-    dist : torch.Tensor, (L,L) 
-        distance matrix
-
-    k : int
-        number of neighbors
-
-    Returns:
-    --------
-    * : torch.Tensor, (L, k)
-        Tensor with indices of nearest neighbors for node
-    """
-    E_idx = []
-    if not isinstance(dist, int):
-        ell = len(dist)
-        k = min(k, ell)
-        for i in range(len(dist)):
-            val, idx = torch.topk(dist[i], len(dist), largest=False)
-            idx_temp = torch.where(torch.isnan(val)*1 == 0)[0]
-            E_idx_temp = idx[idx_temp]
-            if len(E_idx_temp) < k:
-                rem = k - len(E_idx_temp)
-                closest = get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(len(dist))))-i),
-                    len(dist))[1:]
-                closest = torch.tensor([i.item() for i in closest if i not in E_idx_temp][:rem]).long()
-                E_idx_temp = torch.cat([E_idx_temp, closest])
-            else:
-                E_idx_temp = E_idx_temp[:k]
-            E_idx.append(E_idx_temp)
-    else:
-        for i in range(dist):
-            E_idx.append(get_k_neighbors_idx(torch.abs(torch.Tensor(list(range(dist)))-i), k+1)[1:])
-    return torch.stack(E_idx)
+    k = min(k, len(dist)-1)
+    val, idx = torch.topk(dist, k, largest=False)
+    return idx
 
 
 def get_edge_features(dist, omega, theta, phi, E_idx):
