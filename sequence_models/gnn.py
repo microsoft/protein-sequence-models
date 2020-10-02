@@ -399,31 +399,55 @@ def argmax2value(array, bins, symmetric=False):
                 
     return processed
 
-def load_npz(path):
-    """
-    Preprocess trRosetta output
-    """
-    data = np.load(path)
-    
-    dist = data['0']
-    theta = data['1']
-    phi = data['2']
-    omega = data['3']
 
-    # bins from trRosetta paper
+def load_npz(dist_bins, theta_bins, phi_bins, omega_bins, path=None, L=None):
+    """
+    From paper
     dist_bins = np.concatenate([np.array([np.nan]), np.linspace(2,20,37)])
     theta_bins = np.concatenate([np.array([np.nan]), np.linspace(0,360, 25)])
     phi_bins = np.concatenate([np.array([np.nan]), np.linspace(0,180, 13)])
     omega_bins = np.concatenate([np.array([np.nan]), np.linspace(0,360, 25)])
     
-    # process
-    dist = argmax2value(dist, dist_bins, symmetric=True)
-    theta = argmax2value(theta, theta_bins, symmetric=False)
-    phi = argmax2value(phi, phi_bins, symmetric=False)
-    omega = argmax2value(omega, omega_bins, symmetric=True)
+    Parameters:
+    -----------
+    dist_bins : array-like
+    
+    theta_bins : array_like
+    
+    phi_bins : array_like 
+    
+    omega_bins : array_like 
+    
+    path = str
+        path to npz file storing argmax vals
+    
+    L = int
+        if path is None, set dim of distance matrix using
         
-    return torch.tensor(dist), torch.tensor(omega), \
-        torch.tensor(theta), torch.tensor(phi)
+    """
+    if path is not None:
+        data = np.load(path)
+
+        dist = data['0']
+        theta = data['1']
+        phi = data['2']
+        omega = data['3']
+
+        # process dist
+        dist = argmax2value(dist, dist_bins, symmetric=True)
+        theta = argmax2value(theta, theta_bins, symmetric=False)
+        phi = argmax2value(phi, phi_bins, symmetric=False)
+        omega = argmax2value(omega, omega_bins, symmetric=True)
+
+        return dist, omega, theta, phi
+    
+    else:
+        syn_dist = torch.abs(torch.Tensor(list(range(L))).repeat(L,1) - \
+                             torch.Tensor(list(range(L))).view(-1,1))
+        
+        syn_dist[syn_dist==0.0] = np.nan
+        
+        return syn_dist
     
 
 def get_node_features(omega, theta, phi):
@@ -465,20 +489,9 @@ def get_node_features(omega, theta, phi):
     
 
 def get_k_neighbors(dist, k):
-    if not isinstance(dist, int):
-        k = min(k, len(dist)-1)
-        val, idx = torch.topk(dist, k, largest=False)
-        return idx
-    else:
-        k = min(k, dist-1)
-        # create synthetic distance matrix based on distance of primary structure
-        syn_dist = torch.abs(torch.Tensor(list(range(dist))).repeat(dist,1) - \
-                             torch.Tensor(list(range(dist))).view(-1,1))
-        
-        val, idx = torch.topk(syn_dist, k+1, largest=False)
-        
-        # take idx[:,1:] to skip self node
-        return idx[:,1:]
+    k = min(k, len(dist)-1)
+    val, idx = torch.topk(dist, k, largest=False)
+    return idx
 
 
 def get_edge_features(dist, omega, theta, phi, E_idx):
