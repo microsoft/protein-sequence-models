@@ -377,26 +377,23 @@ def argmax2value(array, bins, symmetric=False):
     processed = np.zeros(array.shape)
     if symmetric:
         for i in range(len(array)):
-            for j in range(i+1):
-                argmax_val = array[i,j]
+            for j in range(i + 1):
+                argmax_val = array[i, j]
                 if argmax_val != 0:
-                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val+1])
+                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val + 1])
                 else:
                     argmax_val = bins[argmax_val]
-                    
-                processed[i,j] = argmax_val
-                processed[j,i] = argmax_val
-                
+                processed[i, j] = argmax_val
+                processed[j, i] = argmax_val
     else:  
         for i in range(len(array)):
             for j in range(len(array)):
-                argmax_val = array[i,j]
+                argmax_val = array[i, j]
                 if argmax_val != 0:
-                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val+1])
+                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val + 1])
                 else:
-                    bins[argmax_val]
-                    
-                processed[i,j] = argmax_val
+                    argmax_val = bins[argmax_val]
+                processed[i, j] = argmax_val
                 
     return processed
 
