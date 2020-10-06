@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from sequence_models.constants import DIST_BINS, THETA_BINS, PHI_BINS, OMEGA_BINs
+from sequence_models.constants import DIST_BINS, THETA_BINS, PHI_BINS, OMEGA_BINS
 
 ######################## UTILS FROM ORIGINAL PAPER ########################
 
@@ -409,11 +409,12 @@ def bins_to_vals(data=None, L=None):
         dist = argmax2value(dist, DIST_BINS, symmetric=True)
         theta = argmax2value(theta, THETA_BINS, symmetric=False)
         phi = argmax2value(phi, PHI_BINS, symmetric=False)
-        omega = argmax2value(omega, OMEGA_BINs, symmetric=True)
+        omega = argmax2value(omega, OMEGA_BINS, symmetric=True)
         return torch.Tensor(dist), torch.Tensor(omega), \
             torch.Tensor(theta), torch.Tensor(phi)
     else:
         syn_dist = np.abs(np.arange(L)[None, :].repeat(L, axis=0) - np.arange(L).reshape(-1, 1))
+        syn_dist = syn_dist.astype(float)
         syn_dist[syn_dist == 0.0] = np.nan
 
         syn_omega = torch.zeros(L,L) # we could also just do None
@@ -502,7 +503,7 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
     """
 
     if (omega.sum()==0.0) and (theta.sum()==0.0) and (phi.sum()==0.0):
-        return torch.zeros(omega.shape[0], E_idx.shape[1], 6)
+        return torch.zeros(omega.shape[0], E_idx.shape[1], 6)*np.nan
 
     dist_E = []
     omega_E = []
@@ -700,9 +701,10 @@ class Struct2SeqDecoder(nn.Module):
             Log probs of residue predictions 
         """
 
-        # Prepare node and edge embeddings
+        # Prepare node, edge, sequence embeddings
         h_V = self.W_v(nodes)
         h_E = self.W_e(edges)
+        h_S = self.W_s(src)
 
         # Mask edge and nodes if structure not available
         if (nodes.sum() == 0.0) and (edges.sum() == 0.0):
@@ -710,8 +712,14 @@ class Struct2SeqDecoder(nn.Module):
             h_V *= V_mask
             h_E *= E_mask 
 
+            # if no structure, just keep the sequence info 
+            h_S_encoder = cat_neighbors_nodes(h_S, torch.zeros_like(h_E), connections)
+            h_S_encoder = cat_neighbors_nodes(torch.zeros_like(h_V), h_S_encoder, connections)
+
+        else:
+            h_S_encoder = 0.
+
         # Concatenate sequence embeddings for autoregressive decoder
-        h_S = self.W_s(src)
         h_ES = cat_neighbors_nodes(h_S, h_E, connections)
 
         # Build encoder embeddings
@@ -736,7 +744,7 @@ class Struct2SeqDecoder(nn.Module):
         for layer in self.decoder_layers:
             # Masked positions attend to encoder information, unmasked see. 
             h_ESV = cat_neighbors_nodes(h_V, h_ES, connections)
-            h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw
+            h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw + h_S_encoder
             h_V = layer(h_V, h_ESV, mask_V=None)
         
         logits = self.W_out(h_V) 
