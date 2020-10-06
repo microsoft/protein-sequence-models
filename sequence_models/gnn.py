@@ -374,28 +374,23 @@ class NeighborAttention(nn.Module):
 ######################## OUR METHODS ########################
 
 def argmax2value(array, bins, symmetric=False):
-    processed = np.zeros(array.shape)
+    bin_space = bins[-1] - bins[-2]
+    
+    start = bins[array]
+    end = start + bin_space
+
+    start = np.nan_to_num(start)
+    end = np.nan_to_num(end)
+    
+    syn_matrix = np.random.uniform(start,end)
+    
     if symmetric:
-        for i in range(len(array)):
-            for j in range(i + 1):
-                argmax_val = array[i, j]
-                if argmax_val != 0:
-                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val + 1])
-                else:
-                    argmax_val = bins[argmax_val]
-                processed[i, j] = argmax_val
-                processed[j, i] = argmax_val
-    else:  
-        for i in range(len(array)):
-            for j in range(len(array)):
-                argmax_val = array[i, j]
-                if argmax_val != 0:
-                    argmax_val = np.random.uniform(bins[argmax_val], bins[argmax_val + 1])
-                else:
-                    argmax_val = bins[argmax_val]
-                processed[i, j] = argmax_val
-                
-    return processed
+        syn_matrix = np.triu(syn_matrix)
+        syn_matrix = syn_matrix + syn_matrix.T - np.diag(np.diag(syn_matrix))
+    
+    syn_matrix[syn_matrix==0.0] = np.nan
+    
+    return syn_matrix
 
 
 def bins_to_vals(data=None, L=None):
@@ -415,11 +410,20 @@ def bins_to_vals(data=None, L=None):
         theta = argmax2value(theta, THETA_BINS, symmetric=False)
         phi = argmax2value(phi, PHI_BINS, symmetric=False)
         omega = argmax2value(omega, OMEGA_BINs, symmetric=True)
-        return dist, omega, theta, phi
+        return torch.Tensor(dist), torch.Tensor(omega), \
+            torch.Tensor(theta), torch.Tensor(phi)
     else:
         syn_dist = np.abs(np.arange(L)[None, :].repeat(L, axis=0) - np.arange(L).reshape(-1, 1))
         syn_dist[syn_dist == 0.0] = np.nan
-        return syn_dist
+
+        syn_omega = torch.zeros(L,L) # we could also just do None
+        
+        syn_theta = torch.zeros(L,L)
+        
+        syn_phi = torch.zeros(L,L)
+        
+        return torch.Tensor(syn_dist), torch.Tensor(syn_omega), \
+            torch.Tensor(syn_theta), torch.Tensor(syn_phi)
     
 
 def get_node_features(omega, theta, phi):
@@ -442,6 +446,9 @@ def get_node_features(omega, theta, phi):
     * : torch.Tensor, (L, 10)
         {sin, cos}×(ωi, φi, φ_ri, ψi, ψ_ri). 
     """
+
+    if (omega.sum()==0.0) and (theta.sum()==0.0) and (phi.sum()==0.0):
+        return torch.zeros(omega.shape[0], 10)
 
     # omega is symmetric, n1 is omega angle relative to prior
     n1 = torch.cat((torch.tensor([0.]), torch.diagonal(omega, offset=1)))
@@ -493,6 +500,9 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
         Edge features 
 
     """
+
+    if (omega.sum()==0.0) and (theta.sum()==0.0) and (phi.sum()==0.0):
+        return torch.zeros(omega.shape[0], E_idx.shape[1], 6)
 
     dist_E = []
     omega_E = []
@@ -657,6 +667,11 @@ class Struct2SeqDecoder(nn.Module):
         mask = mask.type(torch.float32)
         return mask
 
+    def _node_edge_mask(self, src, connections):
+        V_mask = h_V = torch.zeros(src.shape[0], src.shape[1], self.hidden_dim)
+        E_mask = h_E = torch.zeros(src.shape[0], src.shape[1], connections.shape[2], self.hidden_dim)
+        return V_mask, E_mask
+
     def forward(self, nodes, edges, connections, src, edge_mask):
         """
         Parameters:
@@ -684,10 +699,16 @@ class Struct2SeqDecoder(nn.Module):
         log_probs : torch.Tensor, (N_batch, L, num_letters)
             Log probs of residue predictions 
         """
-        
+
         # Prepare node and edge embeddings
         h_V = self.W_v(nodes)
         h_E = self.W_e(edges)
+
+        # Mask edge and nodes if structure not available
+        if (nodes.sum() == 0.0) and (edges.sum() == 0.0):
+            V_mask, E_mask = self._node_edge_mask(src, connections)
+            h_V *= V_mask
+            h_E *= E_mask 
 
         # Concatenate sequence embeddings for autoregressive decoder
         h_S = self.W_s(src)
