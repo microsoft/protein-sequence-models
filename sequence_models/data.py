@@ -5,6 +5,7 @@ import subprocess
 import string
 import json
 from os import path
+import zipfile
 
 import numpy as np
 import torch
@@ -27,7 +28,7 @@ class UniRefDataset(Dataset):
     - 'lengths_and_offsets.npz': byte offsets for the 'consensus.fasta' and sequence lengths
     """
 
-    def __init__(self, data_dir: str, split: str, structure: bool=False):
+    def __init__(self, data_dir: str, split: str, structure=False, structure_zip=False):
         self.data_dir = data_dir
         self.split = split
         self.structure = structure
@@ -35,6 +36,11 @@ class UniRefDataset(Dataset):
             self.indices = json.load(f)[self.split]
         metadata = np.load(self.data_dir + 'lengths_and_offsets.npz')
         self.offsets = metadata['seq_offsets']
+        if structure_zip:
+            self.structure_zip = zipfile.ZipFile(self.data_dir + 'structures.zip')
+            self.names = self.structure_zip.namelist()
+        else:
+            self.names = []
 
     def __len__(self):
         return len(self.indices)
@@ -46,8 +52,13 @@ class UniRefDataset(Dataset):
             f.seek(offset)
             consensus = f.readline()[:-1]
         if self.structure:
-            fname = self.data_dir + 'structures/%08d.npz' %idx
+            sname = 'structures/%08d.npz' %idx
+            fname = self.data_dir + sname
             if path.isfile(fname):
+                structure = np.load(fname)
+                return consensus, structure
+            elif sname in self.names:
+                self.structure_zip.extract(sname)
                 structure = np.load(fname)
                 return consensus, structure
             else:
