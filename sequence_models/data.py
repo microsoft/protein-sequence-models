@@ -15,7 +15,7 @@ import pandas as pd
 from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD, START, STOP, MASK
 from sequence_models.constants import ALL_AAS, trR_ALPHABET
-from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
+from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan, bins_to_vals
 
 
 class UniRefDataset(Dataset):
@@ -273,24 +273,23 @@ class StructureCollater(object):
         connections = torch.zeros(n, max_ell, self.n_connections, dtype=torch.long)
         edge_mask = torch.zeros(n, max_ell, self.n_connections, 1)
         for i, (ell, structure) in enumerate(zip(ells, structures)):
-            if structure is None:
-                continue
             if np.random.random() < self.p_drop:
-                continue
+                structure = None
             # load features
             ## TODO: Check the ordering
-            dist = torch.from_numpy(structure['0']).float()
-            omega = torch.from_numpy(structure['1']).float()
-            theta = torch.from_numpy(structure['2']).float()
-            phi = torch.from_numpy(structure['3']).float()
+            if structure is not None:
+                dist, omega, theta, phi = bins_to_vals(data=structure)
+            else:
+                dist, omega, theta, phi = bins_to_vals(L=ell)
             # process features
             V = get_node_features(omega, theta, phi)
             E_idx = get_k_neighbors(dist, self.n_connections)
             E = get_edge_features(dist, omega, theta, phi, E_idx)
             str_mask = get_mask(E)
             E = replace_nan(E)
+            V = replace_nan(V)
             # reshape
-            nc = min(ell, self.n_connections)
+            nc = min(ell - 1, self.n_connections)
             nodes[i, 1: ell + 1] = V
             edges[i, 1: ell + 1, :nc] = E
             connections[i, 1: ell + 1, :nc] = E_idx

@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from sequence_models.constants import DIST_BINS, THETA_BINS, PHI_BINS, OMEGA_BINs
+from sequence_models.constants import DIST_BINS, THETA_BINS, PHI_BINS, OMEGA_BINS
 
 ######################## UTILS FROM ORIGINAL PAPER ########################
 
@@ -381,14 +381,13 @@ def argmax2value(array, bins, symmetric=False):
 
     start = np.nan_to_num(start)
     end = np.nan_to_num(end)
-    
-    syn_matrix = np.random.uniform(start,end)
+    syn_matrix = np.random.uniform(start, end)
     
     if symmetric:
         syn_matrix = np.triu(syn_matrix)
         syn_matrix = syn_matrix + syn_matrix.T - np.diag(np.diag(syn_matrix))
     
-    syn_matrix[syn_matrix==0.0] = np.nan
+    syn_matrix[syn_matrix == 0.0] = np.nan
     
     return syn_matrix
 
@@ -409,19 +408,15 @@ def bins_to_vals(data=None, L=None):
         dist = argmax2value(dist, DIST_BINS, symmetric=True)
         theta = argmax2value(theta, THETA_BINS, symmetric=False)
         phi = argmax2value(phi, PHI_BINS, symmetric=False)
-        omega = argmax2value(omega, OMEGA_BINs, symmetric=True)
+        omega = argmax2value(omega, OMEGA_BINS, symmetric=True)
         return torch.Tensor(dist), torch.Tensor(omega), \
             torch.Tensor(theta), torch.Tensor(phi)
     else:
-        syn_dist = np.abs(np.arange(L)[None, :].repeat(L, axis=0) - np.arange(L).reshape(-1, 1))
+        syn_dist = np.abs(np.arange(L)[None, :].repeat(L, axis=0) - np.arange(L).reshape(-1, 1)).astype('float')
         syn_dist[syn_dist == 0.0] = np.nan
-
-        syn_omega = torch.zeros(L,L) # we could also just do None
-        
-        syn_theta = torch.zeros(L,L)
-        
-        syn_phi = torch.zeros(L,L)
-        
+        syn_omega = torch.zeros(L, L) # we could also just do None
+        syn_theta = torch.zeros(L, L)
+        syn_phi = torch.zeros(L, L)
         return torch.Tensor(syn_dist), torch.Tensor(syn_omega), \
             torch.Tensor(syn_theta), torch.Tensor(syn_phi)
     
@@ -447,7 +442,7 @@ def get_node_features(omega, theta, phi):
         {sin, cos}×(ωi, φi, φ_ri, ψi, ψ_ri). 
     """
 
-    if (omega.sum()==0.0) and (theta.sum()==0.0) and (phi.sum()==0.0):
+    if (omega.sum() == 0.0) and (theta.sum() == 0.0) and (phi.sum() == 0.0):
         return torch.zeros(omega.shape[0], 10)
 
     # omega is symmetric, n1 is omega angle relative to prior
@@ -668,8 +663,8 @@ class Struct2SeqDecoder(nn.Module):
         return mask
 
     def _node_edge_mask(self, src, connections):
-        V_mask = h_V = torch.zeros(src.shape[0], src.shape[1], self.hidden_dim)
-        E_mask = h_E = torch.zeros(src.shape[0], src.shape[1], connections.shape[2], self.hidden_dim)
+        V_mask = torch.zeros(src.shape[0], src.shape[1], self.hidden_dim, device=src.device)
+        E_mask = torch.zeros(src.shape[0], src.shape[1], connections.shape[2], self.hidden_dim, device=src.device)
         return V_mask, E_mask
 
     def forward(self, nodes, edges, connections, src, edge_mask):
