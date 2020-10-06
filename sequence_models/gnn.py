@@ -386,9 +386,7 @@ def argmax2value(array, bins, symmetric=False):
     if symmetric:
         syn_matrix = np.triu(syn_matrix)
         syn_matrix = syn_matrix + syn_matrix.T - np.diag(np.diag(syn_matrix))
-    
     syn_matrix[syn_matrix == 0.0] = np.nan
-    
     return syn_matrix
 
 
@@ -496,8 +494,8 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
 
     """
 
-    if (omega.sum()==0.0) and (theta.sum()==0.0) and (phi.sum()==0.0):
-        return torch.zeros(omega.shape[0], E_idx.shape[1], 6)
+    if (omega.sum() == 0.0) and (theta.sum() == 0.0) and (phi.sum() == 0.0):
+        return torch.zeros(omega.shape[0], E_idx.shape[1], 6) * np.nan
 
     dist_E = []
     omega_E = []
@@ -695,9 +693,10 @@ class Struct2SeqDecoder(nn.Module):
             Log probs of residue predictions 
         """
 
-        # Prepare node and edge embeddings
+        # Prepare node, edge, sequence embeddings
         h_V = self.W_v(nodes)
         h_E = self.W_e(edges)
+        h_S = self.W_s(src)
 
         # Mask edge and nodes if structure not available
         if (nodes.sum() == 0.0) and (edges.sum() == 0.0):
@@ -705,8 +704,14 @@ class Struct2SeqDecoder(nn.Module):
             h_V *= V_mask
             h_E *= E_mask 
 
+            # if no structure, just keep the sequence info
+            h_S_encoder = cat_neighbors_nodes(h_S, torch.zeros_like(h_E), connections)
+            h_S_encoder = cat_neighbors_nodes(torch.zeros_like(h_V), h_S_encoder, connections)
+
+        else:
+            h_S_encoder = 0.
+
         # Concatenate sequence embeddings for autoregressive decoder
-        h_S = self.W_s(src)
         h_ES = cat_neighbors_nodes(h_S, h_E, connections)
 
         # Build encoder embeddings
@@ -731,7 +736,7 @@ class Struct2SeqDecoder(nn.Module):
         for layer in self.decoder_layers:
             # Masked positions attend to encoder information, unmasked see. 
             h_ESV = cat_neighbors_nodes(h_V, h_ES, connections)
-            h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw
+            h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw + h_S_encoder
             h_V = layer(h_V, h_ESV, mask_V=None)
         
         logits = self.W_out(h_V) 
