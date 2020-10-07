@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 
-from sequence_models.layers import PositionFeedForward
+from sequence_models.layers import PositionFeedForward, PositionFeedForward2d, Attention2d
 
 
 class MaskedConv1d(nn.Conv1d):
@@ -38,6 +38,39 @@ class MaskedConv1d(nn.Conv1d):
         if input_mask is not None:
             x = x * input_mask
         return super().forward(x.transpose(1, 2)).transpose(1, 2)
+
+
+class MaskedConv2d(nn.Conv2d):
+    """ A masked 2-dimensional convolution layer.
+
+    Takes the same arguments as torch.nn.Conv2D, except that the padding is set automatically.
+
+         Shape:
+            Input: (N, L, L, in_channels)
+            input_mask: (N, L, L, 1), optional
+            Output: (N, L, L, out_channels)
+    """
+
+    def __init__(self, in_channels: int, out_channels: int,
+                 kernel_size: int, stride: int=1, dilation: int=1, groups: int=1,
+                 bias: bool=True):
+        """
+        :param in_channels: input channels
+        :param out_channels: output channels
+        :param kernel_size: the kernel width
+        :param stride: filter shift
+        :param dilation: dilation factor
+        :param groups: perform depth-wise convolutions
+        :param bias: adds learnable bias to output
+        """
+        padding = dilation * (kernel_size - 1) // 2
+        super().__init__(in_channels, out_channels, kernel_size, stride=stride, dilation=dilation,
+                                           groups=groups, bias=bias, padding=padding)
+
+    def forward(self, x, input_mask=None):
+        if input_mask is not None:
+            x = x * input_mask
+        return super().forward(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
 
 
 class MaskedCausalConv1d(nn.Module):
@@ -345,5 +378,100 @@ class ConditionedByteNetDecoder(ByteNet):
         e = torch.cat([e, c_], dim=2)  # (n, ell, d_model)
         # Mask out the unwanted connections
         return e
+
+
+class ByteNetBlock2d(nn.Module):
+    """Residual block from ByteNet paper (https://arxiv.org/abs/1610.10099).
+
+         Shape:
+            Input: (N, L, L, d_in)
+            input_mask: (N, L, L, 1), optional
+            Output: (N, L, L, d_out)
+
+    """
+
+    def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1):
+        super().__init__()
+        self.conv = MaskedConv2d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
+        layers1 = [
+            nn.LayerNorm(d_in),
+            nn.ReLU(),
+            PositionFeedForward2d(d_in, d_h),
+            nn.LayerNorm(d_h),
+            nn.ReLU()
+        ]
+        layers2 = [
+            nn.LayerNorm(d_h),
+            nn.ReLU(),
+            PositionFeedForward2d(d_h, d_out),
+        ]
+        self.sequence1 = nn.Sequential(*layers1)
+        self.sequence2 = nn.Sequential(*layers2)
+
+    def forward(self, x, input_mask=None):
+        """
+        :param x: (batch, length, length, in_channels)
+        :param input_mask: (batch, length, length, 1)
+        :return: (batch, length, length, out_channels)
+        """
+        return x + self.sequence2(
+            self.conv(self.sequence1(x), input_mask=input_mask)
+        )
+
+
+class ByteNet2d(nn.Module):
+    """Stacked residual blocks from ByteNet paper defined by n_layers
+
+         Shape:
+            Input: (N, L, L, d_in)
+            input_mask: (N, L, L, 1), optional
+            Output: (N, L, d_model)
+
+    """
+
+    def __init__(self, d_in, d_model, n_layers, kernel_size, r, dropout=0.0):
+        """
+        :param d_in: number of input dimensions
+        :param d_model: dimension to use within ByteNet model, // 2 every layer
+        :param n_layers: number of layers of ByteNet block
+        :param kernel_size: the kernel width
+        :param r: used to calculate dilation factor
+        """
+        super().__init__()
+        self.up_embedder = PositionFeedForward2d(d_in, d_model)
+        log2 = int(np.log2(r)) + 1
+        dilations = [2 ** (n % log2) for n in range(n_layers)]
+        layers = [
+            ByteNetBlock2d(d_model, d_model // 2, d_model, kernel_size, dilation=d)
+            for d in dilations
+        ]
+        self.layers = nn.ModuleList(modules=layers)
+        self.dropout = dropout
+
+    def forward(self, x, input_mask=None):
+        e = self._embed(x)
+        return self._convolve(e, input_mask=input_mask)
+
+    def _embed(self, x):
+        e = self.up_embedder(x)
+        return e
+
+    def _convolve(self, e, input_mask=None):
+        for layer in self.layers:
+            e = layer(e, input_mask=input_mask)
+            if self.dropout > 0.0:
+                e = F.dropout(e, self.dropout)
+        return e
+
+
+class StructureEmbedder(nn.Module):
+
+    def __init__(self, d_in, d_model, n_layers, kernel_size, r, dropout=0.0):
+        super().__init__()
+        self.embedder = ByteNet2d(d_in, d_model, n_layers, kernel_size, r, dropout=dropout)
+        self.attention = Attention2d(d_model)
+
+    def forward(self, x, input_mask=None):
+        return self.attention(self.embedder(x, input_mask=input_mask.unsqueeze(-1)), input_mask=input_mask)
 
 
