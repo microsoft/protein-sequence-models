@@ -464,7 +464,7 @@ class ByteNet2d(nn.Module):
         return e
 
 
-class StructureEmbedder(nn.Module):
+class StructureConditioner(nn.Module):
 
     def __init__(self, d_in, d_model, n_layers, kernel_size, r, dropout=0.0):
         super().__init__()
