@@ -461,7 +461,7 @@ def get_node_features(omega, theta, phi):
     
 
 def get_k_neighbors(dist, k):
-    k = min(k, len(dist)-1)
+    k = min(k, len(dist) - 1)
     val, idx = torch.topk(dist, k, largest=False)
     return idx
 
@@ -485,7 +485,7 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
         phi angles
 
     connections : torch.Tensor (L, k_neighbors)
-        indicies of k nearest neighbors of each node
+        indices of k nearest neighbors of each node
 
     Returns:
     --------
@@ -534,12 +534,10 @@ def get_mask(E):
 
     Returns:
     --------
-    * : torch.Tensor, (L)
+    * : torch.Tensor, (L, k, 1)
         mask to hide nodes with missing features
     """
-    mask_E = torch.tensor(np.isfinite(np.sum(np.array(E), -1)).astype(np.float32)).view(E.shape[0], E.shape[1], 1)
-    # mask_V = torch.tensor(np.isfinite(np.sum(np.array(nodes),-1)).astype(np.float32)).view(1,-1)
-    # return mask_V, edge_mask
+    mask_E = torch.isfinite(torch.sum(E, dim=-1)).float().view(E.shape[0], E.shape[1], 1)
     return mask_E
 
 
@@ -557,7 +555,7 @@ def replace_nan(E):
     edges : torch.Tensor, (L, k_neighbors, 6)
         Edge features with imputed missing data
     """
-    isnan = np.isnan(E).bool()
+    isnan = torch.isnan(E)
     E[isnan] = 0.
     return E
 
@@ -699,15 +697,12 @@ class Struct2SeqDecoder(nn.Module):
         h_S = self.W_s(src)
 
         # Mask edge and nodes if structure not available
-        if (nodes.sum() == 0.0) and (edges.sum() == 0.0):
-            V_mask, E_mask = self._node_edge_mask(src, connections)
-            h_V *= V_mask
-            h_E *= E_mask 
-
+        if torch.all(nodes == 0) and torch.all(edges == 0):
+            h_V *= 0
+            h_E *= 0
             # if no structure, just keep the sequence info
-            h_S_encoder = cat_neighbors_nodes(h_S, torch.zeros_like(h_E), connections)
-            h_S_encoder = cat_neighbors_nodes(torch.zeros_like(h_V), h_S_encoder, connections)
-
+            h_S_encoder = cat_neighbors_nodes(h_S, h_E, connections)
+            h_S_encoder = cat_neighbors_nodes(h_V, h_S_encoder, connections)
         else:
             h_S_encoder = 0.
 
@@ -715,7 +710,7 @@ class Struct2SeqDecoder(nn.Module):
         h_ES = cat_neighbors_nodes(h_S, h_E, connections)
 
         # Build encoder embeddings
-        h_ES_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)
+        h_ES_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)  # n, L, 2 * h * c
         h_ESV_encoder = cat_neighbors_nodes(h_V, h_ES_encoder, connections)
 
         # Decoder uses masked self-attention
