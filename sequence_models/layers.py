@@ -1,9 +1,6 @@
 from typing import List
 
 import torch.nn as nn
-import torch.nn.functional as F
-
-from sequence_models.convolutional import MaskedConv2d
 
 
 class PositionFeedForward(nn.Module):
@@ -53,20 +50,3 @@ class FCStack(nn.Sequential):
                 layers.append(nn.Dropout(p))
             layers.append(nn.ReLU(inplace=True))
         super().__init__(*layers)
-
-
-class Attention2d(nn.Module):
-
-    def __init__(self, in_dim):
-        super().__init__()
-        self.layer = MaskedConv2d(in_dim, 1, 1)
-
-    def forward(self, x, input_mask=None):
-        n, ell, _, _ = x.shape
-        attn = self.layer(x)
-        attn = attn.view(n, -1)
-        if input_mask is not None:
-            attn = attn.masked_fill_(input_mask.view(n, -1), float('-inf'))
-        attn = F.softmax(attn, dim=-1).view(n, -1, 1)
-        out = (attn * x.view(n, ell * ell, -1)).mean(dim=1)
-        return out

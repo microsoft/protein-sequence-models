@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 
-from sequence_models.layers import PositionFeedForward, PositionFeedForward2d, Attention2d
+from sequence_models.layers import PositionFeedForward, PositionFeedForward2d
 
 
 class MaskedConv1d(nn.Conv1d):
@@ -344,16 +344,30 @@ class ByteNet(nn.Module):
         return e
 
 
+class ByteNetLM(nn.Module):
+
+    def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
+                 padding_idx=None, causal=False, dropout=0.0):
+        super().__init__()
+        self.embedder = ByteNet(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
+                                padding_idx=padding_idx, causal=causal, dropout=dropout)
+        self.decoder = PositionFeedForward(d_model, n_tokens)
+
+    def forward(self, x, input_mask=None):
+        e = self.embedder(x, input_mask=input_mask)
+        return self.decoder(e)
+
+
 class ConditionedByteNetDecoder(ByteNet):
-    """ A conditioned, (hierarchical) ByteNet decoder.
+    """ A conditioned, ByteNet decoder.
     Inputs:
         x (n, ell)
-        c: (n, n_blocks, d_conditioning)
+        c: (n, d_conditioning)
         ells: lengths of blocks
 
     """
 
-    def __init__(self, n_tokens, d_embedding, d_conditioning, d_model, n_layers, kernel_size, r, ells):
+    def __init__(self, n_tokens, d_embedding, d_conditioning, d_model, n_layers, kernel_size, r):
         """
         :param n_tokens: number of tokens in token dictionary
         :param d_embedding: dimension of embedding
@@ -362,21 +376,20 @@ class ConditionedByteNetDecoder(ByteNet):
         :param n_layers: number of layers of ByteNet block
         :param kernel_size: the kernel width
         :param r: used to calculate dilation factor
-        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
         """
         super().__init__(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                         ells=ells, padding_idx=None, causal=True)
+                         ells=None, padding_idx=None, causal=True)
         self.up_embedder = PositionFeedForward(d_embedding, d_model - d_conditioning)
-        self.ells = nn.Parameter(torch.tensor(ells), requires_grad=False)
 
     def _embed(self, inputs):
         x, c = inputs
         e = self.embedder(x)
         e = self.up_embedder(e)  # (n, ell, d_model - d_conditioning)
         # Concatenate the conditioning
-        c_ = torch.repeat_interleave(c, self.ells, dim=1)  # (n, ell, d_conditioning)
+        _, ell = x.shape
+        c = c.unsqueeze(1)
+        c_ = torch.repeat_interleave(c, ell, dim=1)  # (n, ell, d_conditioning)
         e = torch.cat([e, c_], dim=2)  # (n, ell, d_model)
-        # Mask out the unwanted connections
         return e
 
 
@@ -463,15 +476,5 @@ class ByteNet2d(nn.Module):
                 e = F.dropout(e, self.dropout)
         return e
 
-
-class StructureConditioner(nn.Module):
-
-    def __init__(self, d_in, d_model, n_layers, kernel_size, r, dropout=0.0):
-        super().__init__()
-        self.embedder = ByteNet2d(d_in, d_model, n_layers, kernel_size, r, dropout=dropout)
-        self.attention = Attention2d(d_model)
-
-    def forward(self, x, input_mask=None):
-        return self.attention(self.embedder(x, input_mask=input_mask.unsqueeze(-1)), input_mask=input_mask)
 
 
