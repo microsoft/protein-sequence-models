@@ -28,7 +28,7 @@ class UniRefDataset(Dataset):
     - 'lengths_and_offsets.npz': byte offsets for the 'consensus.fasta' and sequence lengths
     """
 
-    def __init__(self, data_dir: str, split: str, structure=False, structure_zip=False):
+    def __init__(self, data_dir: str, split: str, structure=False, structure_zip=False, p_drop=0.0):
         self.data_dir = data_dir
         self.split = split
         self.structure = structure
@@ -41,6 +41,7 @@ class UniRefDataset(Dataset):
             self.names = self.structure_zip.namelist()
         else:
             self.names = []
+        self.p_drop = p_drop
 
     def __len__(self):
         return len(self.indices)
@@ -56,13 +57,19 @@ class UniRefDataset(Dataset):
             fname = self.data_dir + sname
             if path.isfile(fname):
                 structure = np.load(fname)
-                return consensus, structure
             elif sname in self.names:
                 self.structure_zip.extract(sname)
                 structure = np.load(fname)
-                return consensus, structure
             else:
-                return consensus, None
+                structure = None
+            if structure is not None:
+                if np.random.random() < self.p_drop:
+                    structure = None
+                else:
+                    dist, omega, theta, phi = bins_to_vals(data=structure)
+            if structure is None:
+                dist, omega, theta, phi = bins_to_vals(L=len(consensus))
+            return (consensus, dist, omega, theta, phi)
         return (consensus, )
 
 
@@ -255,15 +262,37 @@ class MLMCollater(SimpleCollater):
         return src, tgt, mask
 
 
+class StructureImageCollater(object):
+
+    def __init__(self, sequence_collater: SimpleCollater):
+        self.sequence_collater = sequence_collater
+
+    def __call__(self, batch: List[Any]) -> Iterable[torch.Tensor]:
+        sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
+        collated_seqs = self.sequence_collater._prep(sequences)
+        ells = [len(s) for s in sequences]
+        max_ell = max(ells)
+        n = len(sequences)
+        structure = torch.zeros(n, max_ell, max_ell, 4)
+        structure_mask = torch.zeros(n, max_ell, max_ell).long()
+        for i, (dist, omega, theta, phi, ell) in enumerate(zip(dists, omegas, thetas, phis, ells)):
+            st = torch.stack([dist, omega, theta, phi], dim=-1)  # ell, ell, 4
+            structure[i, :ell, :ell, :] = st
+            m = torch.isnan(st).sum(dim=-1)  # ell, ell, 4
+            m = (m == 0).long()  # keep locations where nothing is nan
+            structure_mask[i, :ell, :ell] = m
+        structure[torch.isnan(structure)] = 0.0
+        return (*collated_seqs, structure, structure_mask)
+
+
 class StructureCollater(object):
 
-    def __init__(self, sequence_collater: SimpleCollater, p_drop_structure=0.1, n_connections=20):
+    def __init__(self, sequence_collater: SimpleCollater, n_connections=20):
         self.sequence_collater = sequence_collater
-        self.p_drop = p_drop_structure
         self.n_connections = n_connections
 
     def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
-        sequences, structures = tuple(zip(*batch))
+        sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
         collated_seqs = self.sequence_collater._prep(sequences)
         ells = [len(s) for s in sequences]
         max_ell = max(ells) + 1
@@ -272,15 +301,7 @@ class StructureCollater(object):
         edges = torch.zeros(n, max_ell, self.n_connections, 6)
         connections = torch.zeros(n, max_ell, self.n_connections, dtype=torch.long)
         edge_mask = torch.zeros(n, max_ell, self.n_connections, 1)
-        for i, (ell, structure) in enumerate(zip(ells, structures)):
-            if np.random.random() < self.p_drop:
-                structure = None
-            # load features
-            ## TODO: Check the ordering
-            if structure is not None:
-                dist, omega, theta, phi = bins_to_vals(data=structure)
-            else:
-                dist, omega, theta, phi = bins_to_vals(L=ell)
+        for i, (ell, dist, omega, theta, phi) in enumerate(zip(ells, dists, omegas, thetas, phis)):
             # process features
             V = get_node_features(omega, theta, phi)
             E_idx = get_k_neighbors(dist, self.n_connections)
