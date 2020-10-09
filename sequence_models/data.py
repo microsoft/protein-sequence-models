@@ -287,13 +287,11 @@ class StructureImageCollater(object):
         max_ell = max(ells)
         n = len(sequences)
         structure = torch.zeros(n, max_ell, max_ell, 4)
-        structure_mask = torch.zeros(n, max_ell, max_ell).long()
+        structure_mask = torch.zeros(n, max_ell, max_ell)
         for i, (dist, omega, theta, phi, ell) in enumerate(zip(dists, omegas, thetas, phis, ells)):
             st = torch.stack([dist, omega, theta, phi], dim=-1)  # ell, ell, 4
             structure[i, :ell, :ell, :] = st
-            m = torch.isnan(st).sum(dim=-1)  # ell, ell, 4
-            m = (m == 0).long()  # keep locations where nothing is nan
-            structure_mask[i, :ell, :ell] = m
+            structure_mask[i, :ell, :ell] = 1.0
         structure[torch.isnan(structure)] = 0.0
         return (*collated_seqs, structure, structure_mask)
 
