@@ -658,10 +658,10 @@ class Struct2SeqDecoder(nn.Module):
         mask = mask.type(torch.float32)
         return mask
 
-    def _node_edge_mask(self, src, connections):
-        V_mask = torch.zeros(src.shape[0], src.shape[1], self.hidden_dim, device=src.device)
-        E_mask = torch.zeros(src.shape[0], src.shape[1], connections.shape[2], self.hidden_dim, device=src.device)
-        return V_mask, E_mask
+    # def _node_edge_mask(self, src, connections):
+    #     V_mask = torch.zeros(src.shape[0], src.shape[1], self.hidden_dim, device=src.device)
+    #     E_mask = torch.zeros(src.shape[0], src.shape[1], connections.shape[2], self.hidden_dim, device=src.device)
+    #     return V_mask, E_mask
 
     def forward(self, nodes, edges, connections, src, edge_mask):
         """
@@ -692,26 +692,28 @@ class Struct2SeqDecoder(nn.Module):
         """
 
         # Prepare node, edge, sequence embeddings
-        h_V = self.W_v(nodes)
-        h_E = self.W_e(edges)
-        h_S = self.W_s(src)
+        h_V = self.W_v(nodes) # (N, L, h_dim)
+        h_E = self.W_e(edges) # (N, L, k, h_dim)
+        h_S = self.W_s(src) # (N, L, h_dim)
 
         # Mask edge and nodes if structure not available
         if torch.all(nodes == 0) and torch.all(edges == 0):
             h_V *= 0
             h_E *= 0
             # if no structure, just keep the sequence info
-            h_S_encoder = cat_neighbors_nodes(h_S, h_E, connections)
-            h_S_encoder = cat_neighbors_nodes(h_V, h_S_encoder, connections)
+            # h_S_encoder contains only seq info based on connections
+            h_S_encoder = cat_neighbors_nodes(h_S, h_E, connections) # (N, L, k, h_dim*2)
+            h_S_encoder = cat_neighbors_nodes(h_V, h_S_encoder, connections) # (N, L, k, h_dim*3)
         else:
             h_S_encoder = 0.
 
         # Concatenate sequence embeddings for autoregressive decoder
-        h_ES = cat_neighbors_nodes(h_S, h_E, connections)
+        h_ES = cat_neighbors_nodes(h_S, h_E, connections) # (N, L, k, h_dim*2)
 
         # Build encoder embeddings
-        h_ES_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)  # n, L, 2 * h * c
-        h_ESV_encoder = cat_neighbors_nodes(h_V, h_ES_encoder, connections)
+        # h_ES_encoder contains only and all (ahead and past) structure info 
+        h_ES_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)  # (N, L, k, h_dim*2)
+        h_ESV_encoder = cat_neighbors_nodes(h_V, h_ES_encoder, connections) # (N, L, k, h_dim*2)
 
         # Decoder uses masked self-attention
         """
@@ -722,16 +724,26 @@ class Struct2SeqDecoder(nn.Module):
         mask_attend = self._autoregressive_mask(connections).unsqueeze(-1)
         # mask_1D = mask_V.view([mask_V.size(0), mask_V.size(1), 1, 1])
         # mask_bw = mask_1D * edge_mask * mask_attend
-        mask_bw = edge_mask * mask_attend
+        mask_bw = edge_mask * mask_attend # hides everything in the future
         
         # mask_fw = mask_1D * (1. - mask_attend)
-        mask_fw = edge_mask * (1. - mask_attend)
-        h_ESV_encoder_fw = mask_fw * h_ESV_encoder
+        mask_fw = edge_mask * (1. - mask_attend) # hides everything in the past
+        h_ESV_encoder_fw = mask_fw * h_ESV_encoder # get all structure info in the future
+
+
         
         for layer in self.decoder_layers:
-            # Masked positions attend to encoder information, unmasked see. 
-            h_ESV = cat_neighbors_nodes(h_V, h_ES, connections)
-            h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw + h_S_encoder
+
+            # h_ESV is concatenated node, edge and seq info
+            h_ESV = cat_neighbors_nodes(h_V, h_ES, connections) # (N, L, k, h_dim*3)
+            
+            # apply mask to hide everything in the futre
+            h_ESV = mask_bw * h_ESV
+            # readd the structure info in the future
+            h_ESV += h_ESV_encoder_fw
+            # if no structure, add past seq info  
+            h_ESV +=  mask_attend * h_S_encoder
+            
             h_V = layer(h_V, h_ESV, mask_V=None)
         
         logits = self.W_out(h_V) 
