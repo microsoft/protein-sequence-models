@@ -738,9 +738,12 @@ class Struct2SeqDecoder(nn.Module):
             h_ESV = cat_neighbors_nodes(h_V, h_ES, connections) # (N, L, k, h_dim*3)
             
             # apply mask to hide everything in the futre
+            h_ESV = mask_bw * h_ESV
             # readd the structure info in the future
+            h_ESV += h_ESV_encoder_fw
             # if no structure, add past seq info  
-            h_ESV = mask_bw * h_ESV + h_ESV_encoder_fw + (mask_attend * h_S_encoder)
+            h_ESV +=  mask_attend * h_S_encoder
+            
             h_V = layer(h_V, h_ESV, mask_V=None)
         
         logits = self.W_out(h_V) 
