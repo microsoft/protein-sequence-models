@@ -16,7 +16,7 @@ class Attention2d(nn.Module):
         attn = self.layer(x)
         attn = attn.view(n, -1)
         if input_mask is not None:
-            attn = attn.masked_fill_(input_mask.view(n, -1).bool(), float('-inf'))
+            attn = attn.masked_fill_(~input_mask.view(n, -1).bool(), float('-inf'))
         attn = F.softmax(attn, dim=-1).view(n, -1, 1)
         out = (attn * x.view(n, ell * ell, -1)).mean(dim=1)
         return out
@@ -30,7 +30,7 @@ class StructureConditioner(nn.Module):
         self.attention = Attention2d(d_model)
 
     def forward(self, x, input_mask=None):
-        return self.attention(self.embedder(x, input_mask=input_mask.unsqueeze(-1)), input_mask=input_mask)
+        return self.attention(self.embedder(x, input_mask=input_mask), input_mask=input_mask)
 
 
 class StructureConditionedBytenet(nn.Module):

@@ -28,7 +28,7 @@ class UniRefDataset(Dataset):
     - 'lengths_and_offsets.npz': byte offsets for the 'consensus.fasta' and sequence lengths
     """
 
-    def __init__(self, data_dir: str, split: str, structure=False, structure_zip=False, p_drop=0.0):
+    def __init__(self, data_dir: str, split: str, structure=False, structure_zip=False, p_drop=0.0, max_len=2048):
         self.data_dir = data_dir
         self.split = split
         self.structure = structure
@@ -42,6 +42,7 @@ class UniRefDataset(Dataset):
         else:
             self.names = []
         self.p_drop = p_drop
+        self.max_len = max_len
 
     def __len__(self):
         return len(self.indices)
@@ -52,6 +53,12 @@ class UniRefDataset(Dataset):
         with open(self.data_dir + 'consensus.fasta') as f:
             f.seek(offset)
             consensus = f.readline()[:-1]
+        if len(consensus) - self.max_len > 0:
+            start = np.random.choice(len(consensus) - self.max_len)
+            stop = start + self.max_len
+        else:
+            start = 0
+            stop = len(consensus)
         if self.structure:
             sname = 'structures/%08d.npz' %idx
             fname = self.data_dir + sname
@@ -69,7 +76,13 @@ class UniRefDataset(Dataset):
                     dist, omega, theta, phi = bins_to_vals(data=structure)
             if structure is None:
                 dist, omega, theta, phi = bins_to_vals(L=len(consensus))
-            return (consensus, dist, omega, theta, phi)
+            consensus = consensus[start:stop]
+            dist = dist[start:stop, start:stop]
+            omega = omega[start:stop, start:stop]
+            theta = theta[start:stop, start:stop]
+            phi = phi[start:stop, start:stop]
+            return consensus, dist, omega, theta, phi
+        consensus = consensus[start:stop]
         return (consensus, )
 
 
@@ -274,13 +287,11 @@ class StructureImageCollater(object):
         max_ell = max(ells)
         n = len(sequences)
         structure = torch.zeros(n, max_ell, max_ell, 4)
-        structure_mask = torch.zeros(n, max_ell, max_ell).long()
+        structure_mask = torch.zeros(n, max_ell, max_ell)
         for i, (dist, omega, theta, phi, ell) in enumerate(zip(dists, omegas, thetas, phis, ells)):
             st = torch.stack([dist, omega, theta, phi], dim=-1)  # ell, ell, 4
             structure[i, :ell, :ell, :] = st
-            m = torch.isnan(st).sum(dim=-1)  # ell, ell, 4
-            m = (m == 0).long()  # keep locations where nothing is nan
-            structure_mask[i, :ell, :ell] = m
+            structure_mask[i, :ell, :ell] = 1.0
         structure[torch.isnan(structure)] = 0.0
         return (*collated_seqs, structure, structure_mask)
 
