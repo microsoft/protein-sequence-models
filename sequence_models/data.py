@@ -277,8 +277,9 @@ class MLMCollater(SimpleCollater):
 
 class StructureImageCollater(object):
 
-    def __init__(self, sequence_collater: SimpleCollater):
+    def __init__(self, sequence_collater: SimpleCollater, backwards=False):
         self.sequence_collater = sequence_collater
+        self.backwards = backwards
 
     def __call__(self, batch: List[Any]) -> Iterable[torch.Tensor]:
         sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
@@ -290,6 +291,8 @@ class StructureImageCollater(object):
         structure_mask = torch.zeros(n, max_ell, max_ell)
         for i, (dist, omega, theta, phi, ell) in enumerate(zip(dists, omegas, thetas, phis, ells)):
             st = torch.stack([dist, omega, theta, phi], dim=-1)  # ell, ell, 4
+            if self.backwards:
+                st = torch.flip(st, [0, 1])
             structure[i, :ell, :ell, :] = st
             structure_mask[i, :ell, :ell] = 1.0
         structure[torch.isnan(structure)] = 0.0
@@ -298,9 +301,10 @@ class StructureImageCollater(object):
 
 class StructureCollater(object):
 
-    def __init__(self, sequence_collater: SimpleCollater, n_connections=20):
+    def __init__(self, sequence_collater: SimpleCollater, n_connections=20, backwards=False):
         self.sequence_collater = sequence_collater
         self.n_connections = n_connections
+        self.backwards = backwards
 
     def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
         sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
@@ -313,6 +317,11 @@ class StructureCollater(object):
         connections = torch.zeros(n, max_ell, self.n_connections, dtype=torch.long)
         edge_mask = torch.zeros(n, max_ell, self.n_connections, 1)
         for i, (ell, dist, omega, theta, phi) in enumerate(zip(ells, dists, omegas, thetas, phis)):
+            if self.backwards:
+                dist = torch.flip(dist, [0, 1])
+                omega = torch.flip(omega, [0, 1])
+                theta = torch.flip(theta, [0, 1])
+                phi = torch.flip(phi, [0, 1])
             # process features
             V = get_node_features(omega, theta, phi)
             E_idx = get_k_neighbors(dist, self.n_connections)
