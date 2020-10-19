@@ -206,14 +206,14 @@ class TAPECollater(SimpleCollater):
         prepped = self._prep(sequences)
         y = data[1]
         # if len(y.size()) == 0:
-        if isinstance(y, float) or isinstance(y, int):
+        if isinstance(y[0], float) or isinstance(y[0], int):
             y = y
         
-        if len(y[0].size()) == 1: # secondary structure
+        elif len(y[0].size()) == 1: # secondary structure
             pad_idx = self.tokenizer.alphabet.index(PAD)
             y = _pad(y, pad_idx)
 
-        if len(y[0].size()) == 2: # contact
+        elif len(y[0].size()) == 2: # contact
             # get max len
             max_len = max(len(i) for i in y)
             y = [F.pad(yi, (0, max_len-len(yi), 0, max_len-len(yi))) for yi in y] # need to return mask
