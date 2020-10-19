@@ -220,9 +220,23 @@ class TAPEDataset(Dataset):
                  data_path: Union[str, Path],
                  data_type: str,
                  split: str,
+                 contact_method : str = 'distance',
                  in_memory: bool = False):
+
+        """
+        data_path : path to data directory
+
+        data_type : name of downstream task, [fluorescence, stability, remote_homology, 
+            secondary_structure, contact]
+        
+        split : data split to load
+
+        contact_method : if data_type == contact, choose 'distance' to get 
+            distance instead of binary contact output
+        """
         
         self.data_type = data_type
+        self.contact_method = contact_method
         
         if data_type == 'fluorescence':
             if split not in ('train', 'valid', 'test'):
@@ -287,16 +301,18 @@ class TAPEDataset(Dataset):
 #             labels = np.asarray(item['ss3'], np.int64)
 #             labels = np.pad(labels, (1, 1), 'constant', constant_values=-1)
             output = torch.Tensor(item[self.output_label],).to(torch.int8)
+            # output = item[self.output_label]
     
         if self.data_type in ['contact']:
             # -1 is contact, 0 in no contact
-            # need to fix padding in contact map i think
-            valid_mask = item['valid_mask']
-            contact_map = np.less(squareform(pdist(item[self.output_label])), 8.0).astype(np.int64)
-            yind, xind = np.indices(contact_map.shape)
-            invalid_mask = ~(valid_mask[:, None] & valid_mask[None, :])
-            invalid_mask |= np.abs(yind - xind) < 6
-            contact_map[invalid_mask] = -1
-            output = torch.Tensor(contact_map).to(torch.int8)
-            
+            if self.contact_method == 'distance':
+                output = torch.Tensor(squareform(pdist(item[self.output_label])))
+            else:
+                valid_mask = item['valid_mask']
+                contact_map = np.less(squareform(pdist(item[self.output_label])), 8.0).astype(np.int64)
+                yind, xind = np.indices(contact_map.shape)
+                invalid_mask = ~(valid_mask[:, None] & valid_mask[None, :])
+                invalid_mask |= np.abs(yind - xind) < 6
+                contact_map[invalid_mask] = -1
+                output = torch.Tensor(contact_map).to(torch.int8)
         return primary, output

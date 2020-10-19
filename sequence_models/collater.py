@@ -10,6 +10,7 @@ import zipfile
 import numpy as np
 import torch
 from torch.utils.data import Dataset, Sampler, BatchSampler
+import torch.nn.functional as F
 import pandas as pd
 
 from sequence_models.utils import Tokenizer
@@ -204,4 +205,18 @@ class TAPECollater(SimpleCollater):
         sequences = data[0]
         prepped = self._prep(sequences)
         y = data[1]
-        return prepped, y
+        # if len(y.size()) == 0:
+        if isinstance(y, float) or isinstance(y, int):
+            y = y
+        
+        if len(y[0].size()) == 1: # secondary structure
+            pad_idx = self.tokenizer.alphabet.index(PAD)
+            y = _pad(y, pad_idx)
+
+        if len(y[0].size()) == 2: # contact
+            # get max len
+            max_len = max(len(i) for i in y)
+            y = [F.pad(yi, (0, max_len-len(yi), 0, max_len-len(yi))) for yi in y] # need to return mask
+            y = tuple(y)
+
+        return prepped[0], y
