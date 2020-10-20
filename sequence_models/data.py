@@ -5,7 +5,6 @@ import subprocess
 import string
 import json
 from os import path
-import zipfile
 
 import numpy as np
 import torch
@@ -28,7 +27,7 @@ class UniRefDataset(Dataset):
     - 'lengths_and_offsets.npz': byte offsets for the 'consensus.fasta' and sequence lengths
     """
 
-    def __init__(self, data_dir: str, split: str, structure=False, structure_zip=False, p_drop=0.0, max_len=2048):
+    def __init__(self, data_dir: str, split: str, structure=False, pdb=False, p_drop=0.0, max_len=2048):
         self.data_dir = data_dir
         self.split = split
         self.structure = structure
@@ -36,11 +35,11 @@ class UniRefDataset(Dataset):
             self.indices = json.load(f)[self.split]
         metadata = np.load(self.data_dir + 'lengths_and_offsets.npz')
         self.offsets = metadata['seq_offsets']
-        if structure_zip:
-            self.structure_zip = zipfile.ZipFile(self.data_dir + 'structures.zip')
-            self.names = self.structure_zip.namelist()
+        self.pdb = pdb
+        if self.pdb:
+            self.n_digits = 6
         else:
-            self.names = []
+            self.n_digits = 8
         self.p_drop = p_drop
         self.max_len = max_len
 
@@ -60,18 +59,20 @@ class UniRefDataset(Dataset):
             start = 0
             stop = len(consensus)
         if self.structure:
-            sname = 'structures/%08d.npz' %idx
+            sname = 'structures/{num:{fill}{width}}.npz'.format(num=idx, fill='0', width=self.n_digits)
             fname = self.data_dir + sname
             if path.isfile(fname):
-                structure = np.load(fname)
-            elif sname in self.names:
-                self.structure_zip.extract(sname)
                 structure = np.load(fname)
             else:
                 structure = None
             if structure is not None:
                 if np.random.random() < self.p_drop:
                     structure = None
+                elif self.pdb:
+                    dist = torch.tensor(structure['dist']).float()
+                    omega = torch.tensor(structure['omega']).float()
+                    theta = torch.tensor(structure['theta']).float()
+                    phi = torch.tensor(structure['phi']).float()
                 else:
                     dist, omega, theta, phi = bins_to_vals(data=structure)
             if structure is None:
