@@ -334,7 +334,7 @@ class StructureCollater(object):
             E = replace_nan(E)
             V = replace_nan(V)
             # reshape
-            nc = min(ell, self.n_connections)
+            nc = min(ell - 1, self.n_connections)
             nodes[i, :ell] = V
             edges[i, :ell, :nc] = E
             connections[i, :ell, :nc] = E_idx
