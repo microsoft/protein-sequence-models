@@ -22,6 +22,32 @@ class Attention2d(nn.Module):
         return out
 
 
+class Attention1d(nn.Module):
+    
+    def __init__(self, L, h_dim):
+        super().__init__()
+        self.linear = nn.Linear(L*h_dim, L*h_dim)
+        
+    def forward(self, x, input_mask=None):
+        """
+        x : torch.Tensor, (N, L, h_dim)
+            input tensor
+            
+        input_mask : torch.Tensor, (N, L)
+            to mask specific residues or start/stop token 
+            
+        """
+        n, el, h_dim = x.shape
+        x = x.view(-1)
+        attn = self.linear(x)
+        if input_mask is not None:
+            attn = attn.masked_fill_(~input_mask.repeat(n,h_dim,1).T.reshape(-1,).bool(), 
+                                     float('-inf'))
+        attn = F.softmax(attn, dim=-1)
+        out = (attn * x)
+        return out
+    
+    
 class StructureConditioner(nn.Module):
 
     def __init__(self, d_in, d_model, n_layers, kernel_size, r, dropout=0.0):
