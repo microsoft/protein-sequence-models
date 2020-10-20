@@ -165,13 +165,16 @@ class CSVDataset(Dataset):
 
 class SimpleCollater(object):
 
-    def __init__(self, alphabet: str, pad=False):
+    def __init__(self, alphabet: str, pad=False, backwards=False):
         self.pad = pad
         self.tokenizer = Tokenizer(alphabet)
+        self.backwards = backwards
 
     def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
         sequences = data[0]
+        if self.backwards:
+            sequences = [s[::-1] for s in sequences]
         prepped = self._prep(sequences)
         return prepped
 
@@ -311,7 +314,7 @@ class StructureCollater(object):
         sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
         collated_seqs = self.sequence_collater._prep(sequences)
         ells = [len(s) for s in sequences]
-        max_ell = max(ells) + 1
+        max_ell = max(ells)
         n = len(sequences)
         nodes = torch.zeros(n, max_ell, 10)
         edges = torch.zeros(n, max_ell, self.n_connections, 6)
@@ -331,12 +334,12 @@ class StructureCollater(object):
             E = replace_nan(E)
             V = replace_nan(V)
             # reshape
-            nc = min(ell - 1, self.n_connections)
-            nodes[i, 1: ell + 1] = V
-            edges[i, 1: ell + 1, :nc] = E
-            connections[i, 1: ell + 1, :nc] = E_idx
+            nc = min(ell, self.n_connections)
+            nodes[i, :ell] = V
+            edges[i, :ell, :nc] = E
+            connections[i, :ell, :nc] = E_idx
             str_mask = str_mask.view(1, ell, -1)
-            edge_mask[i, 1: ell + 1, :nc, 0] = str_mask
+            edge_mask[i, :ell, :nc, 0] = str_mask
         return (*collated_seqs, nodes, edges, connections, edge_mask)
 
 
