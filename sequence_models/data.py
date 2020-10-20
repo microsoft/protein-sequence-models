@@ -366,7 +366,9 @@ class SortishSampler(Sampler):
         indices += indices[:(self.total_size - len(indices))]
         assert len(indices) == self.total_size
         # subsample
-        indices = indices[self.rank:self.total_size:self.num_replicas]
+        start = self.rank * self.num_samples
+        end = start + self.num_samples
+        indices = indices[start:end]
         assert len(indices) == self.num_samples
         return iter(indices)
 
