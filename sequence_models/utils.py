@@ -1,10 +1,34 @@
 from typing import Iterable
 
 import numpy as np
+import pandas as pd
 from scipy.spatial.distance import squareform, pdist
 
 from sequence_models.constants import STOP, START, MASK, PAD
 from sequence_models.constants import PROTEIN_ALPHABET
+
+
+def get_metrics(fname):
+    with open(fname) as f:
+        lines = f.readlines()
+    valid_lines = []
+    train_lines = []
+    for i, line in enumerate(lines):
+        if 'Training' in line and 'loss' in line:
+            last_train = line
+        if 'Validation complete' in line:
+            valid_lines.append(lines[i - 1])
+            train_lines.append(last_train)
+    metrics = []
+    for t, v in zip(train_lines, valid_lines):
+        step = int(t.split()[6])
+        t_loss = float(t.split()[13])
+        t_accu = float(t.split()[16][:6])
+        v_loss = float(v.split()[13])
+        v_accu = float(v.split()[16][:6])
+        metrics.append((step, t_loss, t_accu, v_loss, v_accu))
+    metrics = pd.DataFrame(metrics, columns=['step', 'train_loss', 'train_accu', 'valid_loss', 'valid_accu'])
+    return metrics
 
 
 def get_weights(seqs):
