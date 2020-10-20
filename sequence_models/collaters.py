@@ -1,32 +1,28 @@
 from typing import List, Any, Iterable
 import random
-import math
-import subprocess
-import string
-import json
-from os import path
-import zipfile
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, Sampler, BatchSampler
 import torch.nn.functional as F
-import pandas as pd
 
 from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD, START, STOP, MASK
-from sequence_models.constants import ALL_AAS, trR_ALPHABET
-from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan, bins_to_vals
+from sequence_models.constants import ALL_AAS
+from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
+
 
 class SimpleCollater(object):
 
-    def __init__(self, alphabet: str, pad=False):
+    def __init__(self, alphabet: str, pad=False, backwards=False):
         self.pad = pad
         self.tokenizer = Tokenizer(alphabet)
+        self.backwards = backwards
 
     def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
         sequences = data[0]
+        if self.backwards:
+            sequences = [s[::-1] for s in sequences]
         prepped = self._prep(sequences)
         return prepped
 
@@ -38,6 +34,33 @@ class SimpleCollater(object):
         else:
             sequences = torch.stack(sequences)
         return (sequences, )
+
+
+class TAPECollater(SimpleCollater):
+
+    def __init__(self, alphabet: str, pad=True,):
+        super().__init__(alphabet, pad=pad)
+
+    def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
+        data = tuple(zip(*batch))
+        sequences = data[0]
+        prepped = self._prep(sequences)
+        y = data[1]
+        # if len(y.size()) == 0:
+        if isinstance(y[0], float) or isinstance(y[0], int):
+            y = y
+        
+        elif len(y[0].size()) == 1: # secondary structure
+            pad_idx = self.tokenizer.alphabet.index(PAD)
+            y = _pad(y, pad_idx)
+
+        elif len(y[0].size()) == 2: # contact
+            # get max len
+            max_len = max(len(i) for i in y)
+            y = [F.pad(yi, (0, max_len-len(yi), 0, max_len-len(yi))) for yi in y] # need to return mask
+            y = tuple(y)
+
+        return prepped[0], y
 
 
 class LMCollater(SimpleCollater):
@@ -166,7 +189,7 @@ class StructureCollater(object):
         sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
         collated_seqs = self.sequence_collater._prep(sequences)
         ells = [len(s) for s in sequences]
-        max_ell = max(ells) + 1
+        max_ell = max(ells)
         n = len(sequences)
         nodes = torch.zeros(n, max_ell, 10)
         edges = torch.zeros(n, max_ell, self.n_connections, 6)
@@ -187,36 +210,9 @@ class StructureCollater(object):
             V = replace_nan(V)
             # reshape
             nc = min(ell - 1, self.n_connections)
-            nodes[i, 1: ell + 1] = V
-            edges[i, 1: ell + 1, :nc] = E
-            connections[i, 1: ell + 1, :nc] = E_idx
+            nodes[i, :ell] = V
+            edges[i, :ell, :nc] = E
+            connections[i, :ell, :nc] = E_idx
             str_mask = str_mask.view(1, ell, -1)
-            edge_mask[i, 1: ell + 1, :nc, 0] = str_mask
+            edge_mask[i, :ell, :nc, 0] = str_mask
         return (*collated_seqs, nodes, edges, connections, edge_mask)
-
-
-class TAPECollater(SimpleCollater):
-
-    def __init__(self, alphabet: str, pad=True,):
-        super().__init__(alphabet, pad=pad)
-
-    def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
-        data = tuple(zip(*batch))
-        sequences = data[0]
-        prepped = self._prep(sequences)
-        y = data[1]
-        # if len(y.size()) == 0:
-        if isinstance(y[0], float) or isinstance(y[0], int):
-            y = y
-        
-        elif len(y[0].size()) == 1: # secondary structure
-            pad_idx = self.tokenizer.alphabet.index(PAD)
-            y = _pad(y, pad_idx)
-
-        elif len(y[0].size()) == 2: # contact
-            # get max len
-            max_len = max(len(i) for i in y)
-            y = [F.pad(yi, (0, max_len-len(yi), 0, max_len-len(yi))) for yi in y] # need to return mask
-            y = tuple(y)
-
-        return prepped[0], y

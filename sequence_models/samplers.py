@@ -1,23 +1,8 @@
-from typing import Union, List, Tuple, Sequence, Dict, Any, Optional, Collection
-from pathlib import Path
-import lmdb
-import random
+from typing import Iterable
 import math
-import subprocess
-import string
-import json
-from os import path
-import zipfile
 
 import numpy as np
-import torch
-from torch.utils.data import Dataset, Sampler, BatchSampler
-import pandas as pd
-
-from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD, START, STOP, MASK
-from sequence_models.constants import ALL_AAS, trR_ALPHABET
-from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan, bins_to_vals
+from torch.utils.data import Sampler, BatchSampler
 
 
 class SortishSampler(Sampler):
@@ -43,7 +28,9 @@ class SortishSampler(Sampler):
         indices += indices[:(self.total_size - len(indices))]
         assert len(indices) == self.total_size
         # subsample
-        indices = indices[self.rank:self.total_size:self.num_replicas]
+        start = self.rank * self.num_samples
+        end = start + self.num_samples
+        indices = indices[start:end]
         assert len(indices) == self.num_samples
         return iter(indices)
 
