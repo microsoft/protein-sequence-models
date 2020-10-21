@@ -741,7 +741,8 @@ class Struct2SeqDecoder(nn.Module):
         
        # Run decoder
         for layer in self.decoder_layers:
-            if self.no_structure: # THIS IS QUESTIONABLE, if we use this, basically only the last layer of the decoder is used...
+            if self.no_structure: # THIS IS QUESTIONABLE, 
+                # if we use this, basically only the last layer of the decoder is used in the case of no structure...
                 h_V *= 0
             # h_ESV is concatenated node, edge and seq info
             h_ESV = cat_neighbors_nodes(h_V, h_ES, connections) # (N, L, k, h_dim*3)
