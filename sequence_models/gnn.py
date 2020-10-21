@@ -750,7 +750,7 @@ class Struct2SeqDecoder(nn.Module):
             h_ESV = mask_fw * h_ESV
             # readd the structure info in the future
             h_ESV += h_EV_encoder
-            # if no structure, add past seq info  
+            # add sequence information according to direction
             h_ESV += h_S_encoder
             # pass to decoder layer
             h_V = layer(h_V, h_ESV, mask_V=None)
