@@ -591,7 +591,8 @@ class Struct2SeqDecoder(nn.Module):
 
     """
     def __init__(self, num_letters, node_features, edge_features,
-                 hidden_dim, num_decoder_layers=3, dropout=0.1, use_mpnn=False,direction='bidirectional'):
+                 hidden_dim, num_decoder_layers=3, dropout=0.1, use_mpnn=False,
+                 direction='bidirectional'):
         
         """
         Parameters:
@@ -664,7 +665,7 @@ class Struct2SeqDecoder(nn.Module):
     #     E_mask = torch.zeros(src.shape[0], src.shape[1], connections.shape[2], self.hidden_dim, device=src.device)
     #     return V_mask, E_mask
 
-    def forward(self, nodes, edges, connections, src, edge_mask):
+    def forward(self, nodes, edges, connections, src, edge_mask,):
         """
         Parameters:
         -----------
@@ -702,6 +703,8 @@ class Struct2SeqDecoder(nn.Module):
         h_V = self.W_v(nodes) # (N, L, h_dim)
         h_E = self.W_e(edges) # (N, L, k, h_dim)
         h_S = self.W_s(src) # (N, L, h_dim)
+        # if src_mask is not None:
+        #     h_S = src_mask * h_S
         
         
         # Prepare masks
@@ -737,18 +740,14 @@ class Struct2SeqDecoder(nn.Module):
             h_S_encoder = mask_bw * h_S_encoder
         if self.direction == 'forward': # use past to predict future
             h_S_encoder = mask_fw * h_S_encoder
-                
-        
+
        # Run decoder
         for layer in self.decoder_layers:
-            if self.no_structure: # THIS IS QUESTIONABLE, 
-                # if we use this, basically only the last layer of the decoder is used in the case of no structure...
-                h_V *= 0
             # h_ESV is concatenated node, edge and seq info
             h_ESV = cat_neighbors_nodes(h_V, h_ES, connections) # (N, L, k, h_dim*3)
             # apply mask to hide everything in the futre
             h_ESV = mask_fw * h_ESV
-            # readd the structure info in the future
+            # read the structure info in the future
             h_ESV += h_EV_encoder
             # add sequence information according to direction
             h_ESV += h_S_encoder
