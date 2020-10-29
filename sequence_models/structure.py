@@ -50,9 +50,9 @@ class Attention2d(nn.Module):
 
 class Attention1d(nn.Module):
 
-    def __init__(self, in_dim):
+    def __init__(self):
         super().__init__()
-        self.layer = MaskedConv2d(in_dim, 1, 1)
+        self.layer = MaskedConv2d(1, 1, 1)
 
     def forward(self, x, input_mask=None):
         """
@@ -61,9 +61,8 @@ class Attention1d(nn.Module):
 
         input_mask : torch.Tensor, (N, L)
             to mask specific residues or start/stop token
-
         """
-        n, ell, _, = x.shape
+        n, ell = x.shape
         x = x.view(n, ell, 1, -1)
         attn = self.layer(x)
         attn = attn.view(n, -1)
@@ -72,7 +71,6 @@ class Attention1d(nn.Module):
         attn = F.softmax(attn, dim=-1).view(n, -1, 1)
         out = (attn * x.view(n, ell, -1)).mean(dim=1)
         return out
-
 
 class StructureConditioner(nn.Module):
 
