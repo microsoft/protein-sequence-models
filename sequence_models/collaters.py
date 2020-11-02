@@ -60,7 +60,8 @@ class TAPECollater(SimpleCollater):
 
         elif len(y[0].size()) == 2:  # contact
             max_len = max(len(i) for i in y)
-            mask = [F.pad(torch.ones_like(yi), (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
+            mask = [F.pad(torch.ones_like(yi),
+                          (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
             mask = torch.stack(mask, dim=0)
             y = [F.pad(yi, (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
             y = torch.stack(y, dim=0)
