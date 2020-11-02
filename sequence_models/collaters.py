@@ -33,7 +33,7 @@ class SimpleCollater(object):
             sequences = _pad(sequences, pad_idx)
         else:
             sequences = torch.stack(sequences)
-        return (sequences, )
+        return (sequences,)
 
 
 class TAPECollater(SimpleCollater):
@@ -53,17 +53,17 @@ class TAPECollater(SimpleCollater):
 
         elif len(y[0].size()) == 1:  # secondary structure
             # pad_idx = self.tokenizer.alphabet.index(PAD)
-            mask = [torch.ones_like(yi) for yi in y]
-            mask = _pad(mask, 0)
-            y = _pad(y, 0)
-            return prepped[0], y, mask
+            # mask = [torch.ones_like(yi) for yi in y]
+            # mask = _pad(mask, -100)
+            y = _pad(y, -100).long()
+            return prepped[0], y, torch.ones_like(y)
 
         elif len(y[0].size()) == 2:  # contact
             max_len = max(len(i) for i in y)
             mask = [F.pad(torch.ones_like(yi), (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
-            mask = torch.Tensor(mask)
+            mask = torch.stack(mask, dim=0)
             y = [F.pad(yi, (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
-            y = torch.Tensor(y)
+            y = torch.stack(y, dim=0)
             return prepped[0], y, mask
 
 
