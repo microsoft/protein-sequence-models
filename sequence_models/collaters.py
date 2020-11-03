@@ -33,12 +33,12 @@ class SimpleCollater(object):
             sequences = _pad(sequences, pad_idx)
         else:
             sequences = torch.stack(sequences)
-        return (sequences, )
+        return (sequences,)
 
 
 class TAPECollater(SimpleCollater):
 
-    def __init__(self, alphabet: str, pad=True,):
+    def __init__(self, alphabet: str, pad=True):
         super().__init__(alphabet, pad=pad)
 
     def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
@@ -54,13 +54,23 @@ class TAPECollater(SimpleCollater):
             pad_idx = self.tokenizer.alphabet.index(PAD)
             y = _pad(y, pad_idx)
             return prepped[0], y
+            y = torch.Tensor(y)
+            return prepped[0], y.view(-1, 1), torch.ones_like(y)
 
-        elif len(y[0].size()) == 2: # contact
+        elif len(y[0].size()) == 1:  # secondary structure
+            # pad_idx = self.tokenizer.alphabet.index(PAD)
+            # mask = [torch.ones_like(yi) for yi in y]
+            # mask = _pad(mask, -100)
+            y = _pad(y, -100).long()
+            return prepped[0], y, torch.ones_like(y)
+
+        elif len(y[0].size()) == 2:  # contact
             max_len = max(len(i) for i in y)
-            mask = [F.pad(torch.ones_like(yi), (0, max_len-len(yi), 0, max_len-len(yi))) for yi in y]
-            mask = tuple(mask)
-            y = [F.pad(yi, (0, max_len-len(yi), 0, max_len-len(yi))) for yi in y] 
-            y = tuple(y)
+            mask = [F.pad(torch.ones_like(yi),
+                          (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
+            mask = torch.stack(mask, dim=0)
+            y = [F.pad(yi, (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
+            y = torch.stack(y, dim=0)
             return prepped[0], y, mask
 
 
