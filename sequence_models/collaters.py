@@ -48,14 +48,7 @@ class TAPECollater(SimpleCollater):
         y = data[1]
 
         if isinstance(y[0], float) or isinstance(y[0], int):
-            return prepped[0], torch.tensor(y).unsqueeze(-1)
-        
-        elif len(y[0].size()) == 1: # secondary structure
-            pad_idx = self.tokenizer.alphabet.index(PAD)
-            y = _pad(y, pad_idx)
-            return prepped[0], y
-            y = torch.Tensor(y)
-            return prepped[0], y.view(-1, 1), torch.ones_like(y)
+            return prepped[0], torch.tensor(y).unsqueeze(-1), None
 
         elif len(y[0].size()) == 1:  # secondary structure
             # pad_idx = self.tokenizer.alphabet.index(PAD)
