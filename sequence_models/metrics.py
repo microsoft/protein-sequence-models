@@ -80,9 +80,9 @@ class LPrecision(object):
         """
         if contact_range == 'short':
             self.res_range = [6, 12]
-        if contact_range == 'medium':
+        elif contact_range == 'medium':
             self.res_range = [12, 24]
-        if contact_range == 'long':
+        elif contact_range == 'long':
             self.res_range = [24, np.inf]
         # contact if d < 8 angstroms, or d > 1/8**2
         self.contact_threshold = 1 / (8.0 ** 2)
