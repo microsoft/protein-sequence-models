@@ -73,7 +73,7 @@ class TAPEDataset(Dataset):
                  data_path: Union[str, Path],
                  data_type: str,
                  split: str,
-                 contact_method : str = 'distance',
+                 sub_type : str = 'distance',
                  eps : float = 1e-6,
                  in_memory: bool = False):
 
@@ -90,7 +90,7 @@ class TAPEDataset(Dataset):
         """
         
         self.data_type = data_type
-        self.contact_method = contact_method
+        self.sub_type = sub_type
         self.eps = eps
         
         if data_type == 'fluorescence':
@@ -126,7 +126,10 @@ class TAPEDataset(Dataset):
                                  f"'ts115', 'cb513']")
 
             data_file = Path(data_path + f'secondary_structure_{split}.lmdb')
-            self.output_label = 'ss3'
+            if self.sub_type == 'ss8':
+                self.output_label = 'ss8'
+            else:
+                self.output_label = 'ss3'
             
         if data_type == 'contact':
             if split not in ('train', 'train_unfiltered', 'valid', 'test'):
