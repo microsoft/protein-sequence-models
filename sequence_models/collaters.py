@@ -47,26 +47,24 @@ class TAPECollater(SimpleCollater):
         prepped = self._prep(sequences)
         y = data[1]
         mask = data[2]
-
         if isinstance(y[0], float):
             y = torch.tensor(y).unsqueeze(-1)
 
         elif isinstance(y[0], int):
             y = torch.tensor(y)
 
-        elif len(y[0].size()) == 1:  # secondary structure
+        elif len(y[0].shape) == 1:  # secondary structure
             # mask = [torch.ones_like(yi) for yi in y]
             # mask = _pad(mask, -100)
             y = _pad(y, -100).long()
 
-        elif len(y[0].size()) == 2:  # contact
+        elif len(y[0].shape) == 2:  # contact
             max_len = max(len(i) for i in y)
-            if mask[0] is not None: # when 1/d^2 is used...
-                mask = [F.pad(mask_i,
-                          (0, max_len - len(mask_i), 0, max_len - len(mask_i))) for mask_i in mask]
-                mask = torch.stack(mask, dim=0)
+            mask = [F.pad(mask_i,
+                      (0, max_len - len(mask_i), 0, max_len - len(mask_i)), value=False) for mask_i in mask]
+            mask = torch.stack(mask, dim=0)
             y = [F.pad(yi, (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
-            y = torch.stack(y, dim=0)
+            y = torch.stack(y, dim=0).float()
 
         return prepped[0], y, mask
 

@@ -3,6 +3,30 @@ import torch
 import torch.nn.functional as F
 
 
+class MaskedMSELoss(nn.MSELoss):
+    """Masked mean square error loss.
+
+    Evaluates the MSE at specified locations.
+
+    Shape:
+        Inputs:
+            - pred: (N, *)
+            - tgt: (N, *)
+            - mask: (N, *) boolean
+    """
+
+    def __init__(self, reduction='mean'):
+        super().__init__(reduction=reduction)
+
+    def forward(self, pred, tgt, mask):
+        # Make sure mask is boolean
+        mask = mask.bool()
+        # Select
+        p = torch.masked_select(pred, mask)
+        t = torch.masked_select(tgt, mask)
+        return super().forward(p, t)
+
+
 class SequenceCrossEntropyLoss(nn.Module):
     """Cross-entropy loss for sequences. """
 

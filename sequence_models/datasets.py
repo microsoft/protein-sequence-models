@@ -6,7 +6,7 @@ import string
 import json
 from os import path
 import pickle as pkl
-from scipy.spatial.distance import *
+from scipy.spatial.distance import squareform, pdist
 
 import numpy as np
 import torch
@@ -154,27 +154,25 @@ class TAPEDataset(Dataset):
         
         if self.data_type in ['secondary_structure']:
             # pad with -1s because of cls/sep tokens
-#             labels = np.asarray(item['ss3'], np.int64)
-#             labels = np.pad(labels, (1, 1), 'constant', constant_values=-1)
             output = torch.Tensor(item[self.output_label],).to(torch.int8)
     
         if self.data_type in ['contact']:
             # -1 is ignore, 0 in no contact, 1 is contact
             valid_mask = item['valid_mask']
-            contact_map = np.less(squareform(pdist(item[self.output_label])), 8.0).astype(np.int64)
-            yind, xind = np.indices(contact_map.shape)
+            distances = squareform(pdist(item[self.output_label]))
+            yind, xind = np.indices(distances.shape)
             invalid_mask = ~(valid_mask[:, None] & valid_mask[None, :])
             invalid_mask |= np.abs(yind - xind) < 6
-            contact_map[invalid_mask] = -1
-            contact_map = torch.Tensor(contact_map).to(torch.int8)
             if self.contact_method == 'distance':
-                output = torch.Tensor(squareform(pdist(item[self.output_label])))
-                output = 1/(output**2 + self.eps)
-                mask = (contact_map == 1)*1.
+                output = torch.tensor(np.exp(-distances ** 2 / 64))
             else:
-                output = contact_map
-
+                contact_map = np.less(distances, 8.0).astype(np.int64)
+                contact_map[invalid_mask] = -1
+                contact_map = torch.Tensor(contact_map).to(torch.int8)
+                output = torch.tensor(contact_map)
+            mask = torch.tensor(~invalid_mask)
         return primary, output, mask
+
 
 class CSVDataset(Dataset):
 
