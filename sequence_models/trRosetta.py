@@ -196,6 +196,69 @@ class trRosettaEnsemble(nn.Module):
         """
         return [mod(x) for mod in self.model_list]
 
+
+class trRosettaDist(nn.Module):
+    """trRosetta for distance only, does not use pretrained weights"""
+
+    def __init__(self, n2d_layers=61, hdim=128, decoder=False):
+        """
+        Args:
+            n2d_layers: int
+                number of layers of the conv block to use for each base model
+            hdim: int
+                input 1d hidden dimension
+            decoder: bool
+                 if True, return dist; else return layer prior decoder
+        """
+        super(trRosettaDist, self).__init__()
+
+        self.conv0 = nn.Conv2d(hdim * 2, 64, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
+        self.instnorm0 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
+
+        dilation = 1
+        layers = []
+        for _ in range(n2d_layers):
+            layers.append(trRosettaBlock(dilation))
+            dilation *= 2
+            if dilation > 16:
+                dilation = 1
+
+        self.layers = nn.ModuleList(modules=layers)
+        self.decoder = decoder
+
+        if decoder:
+            self.conv_dist = nn.Conv2d(64, 1, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
+
+    def forward(self, x, ):
+        """
+        Args:
+            x: torch.tensor (N, L, hdim)
+        Returns:
+            dist: torch.tensor(), (N, L, L)
+            x: torch.tensor(), (N, 64, L, L)
+
+        """
+        n, el, _ = x.shape
+
+        # convert to 2d
+        left = x.unsqueeze(2).repeat(1, 1, el, 1)
+        right = x.unsqueeze(1).repeat(1, el, 1, 1)
+        x = torch.cat((left, right), -1)
+        x = x.permute(0, 3, 1, 2)
+
+        x = F.elu(self.instnorm0(self.conv0(x)))
+        old_elu = x.clone()
+        for layer in self.layers:
+            x, old_elu = layer(x, old_elu)
+
+        if self.decoder:
+            # symmetrize
+            x = 0.5 * (x + torch.transpose(x, 2, 3))
+            dist = self.conv_dist(x).squeeze(1)
+            return dist
+        else:
+            return x
+
 # EXAMPLE
 # filename = 'example/T1001.a3m' 
 # seqs = parse_a3m(filename) # grab seqs
