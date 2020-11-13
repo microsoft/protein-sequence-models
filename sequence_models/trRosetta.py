@@ -199,8 +199,7 @@ class trRosettaEnsemble(nn.Module):
 
 class trRosettaDist(nn.Module):
     """trRosetta for distance only, does not use pretrained weights"""
-
-    def __init__(self, n2d_layers=61, hdim=128, decoder=False):
+    def __init__(self, n2d_layers=61, hdim=128, decoder=True):
         """
         Args:
             n2d_layers: int
