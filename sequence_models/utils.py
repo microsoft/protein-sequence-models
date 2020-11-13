@@ -169,8 +169,20 @@ class AAIndexTokenizer(object):
             with open(dpath + '/red_aaindex.json', 'w') as f:
                 json.dump(red_dict, f)
 
+        # save reduced representation
         with open(dpath + '/red_aaindex.json') as f:
             self.red_dict = json.load(f)
 
     def tokenize(self, seq: str) -> np.ndarray:
-        return np.concatenate([self.red_dict[a] for a in seq])
+        """
+
+        Args:
+            seq: str
+                amino acid sequence
+
+        Returns:
+            encoded: np.array
+                encoded amino acid sequence based on reduced AAIndex representation, (L*n_comp,)
+        """
+        encoded = np.concatenate([self.red_dict[a] for a in seq])
+        return encoded
