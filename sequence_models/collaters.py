@@ -222,3 +222,29 @@ class StructureCollater(object):
             str_mask = str_mask.view(1, ell, -1)
             edge_mask[i, :ell, :nc, 0] = str_mask
         return (*collated_seqs, nodes, edges, connections, edge_mask)
+
+
+class StructureOutputCollater(object):
+
+    def __init__(self, sequence_collater: SimpleCollater):
+        self.sequence_collater = sequence_collater
+
+    def _pad(self, squares, ells, value=0.0):
+        max_len = max(ells)
+        squares = [F.pad(d, [0, max_len - ell, 0, max_len - ell], value=value)
+                   for d, ell in zip(squares, ells)]
+        squares = torch.stack(squares, dim=0)
+        return squares
+
+    def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
+        sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
+        ells = [len(s) for s in sequences]
+        seqs = self.sequence_collater._prep(sequences)[0]
+        dists = [torch.exp(-d ** 2 / 64) for d in dists]
+        masks = [~torch.isnan(dist) for dist in dists]
+        masks = self._pad(masks, ells, value=False)
+        dists = self._pad(dists, ells)
+        omegas = self._pad(omegas, ells)
+        thetas = self._pad(thetas, ells)
+        phis = self._pad(phis, ells)
+        return seqs, dists, omegas, thetas, phis, masks

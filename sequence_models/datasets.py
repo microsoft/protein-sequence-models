@@ -16,7 +16,7 @@ import pandas as pd
 from sequence_models.utils import Tokenizer
 from sequence_models.constants import trR_ALPHABET
 from sequence_models.gnn import bins_to_vals
-
+from sequence_models.pdb_utils import process_coords
 
 class LMDBDataset(Dataset):
     """Creates a dataset from an lmdb file.
@@ -166,7 +166,7 @@ class TAPEDataset(Dataset):
             yind, xind = np.indices(distances.shape)
             invalid_mask = ~(valid_mask[:, None] & valid_mask[None, :])
             invalid_mask |= np.abs(yind - xind) < 6
-            if self.contact_method == 'distance':
+            if self.sub_type == 'distance':
                 output = torch.tensor(np.exp(-distances ** 2 / 64))
             else:
                 contact_map = np.less(distances, 8.0).astype(np.int64)
@@ -263,10 +263,11 @@ class UniRefDataset(Dataset):
     - 'lengths_and_offsets.npz': byte offsets for the 'consensus.fasta' and sequence lengths
     """
 
-    def __init__(self, data_dir: str, split: str, structure=False, pdb=False, p_drop=0.0, max_len=2048):
+    def __init__(self, data_dir: str, split: str, structure=False, pdb=False, coords=False, p_drop=0.0, max_len=2048):
         self.data_dir = data_dir
         self.split = split
         self.structure = structure
+        self.coords = coords
         with open(data_dir + 'splits.json', 'r') as f:
             self.indices = json.load(f)[self.split]
         metadata = np.load(self.data_dir + 'lengths_and_offsets.npz')
@@ -276,6 +277,9 @@ class UniRefDataset(Dataset):
             self.n_digits = 6
         else:
             self.n_digits = 8
+        if self.coords:
+            with open(data_dir + 'coords.pkl', 'rb') as f:
+                self.structures = pkl.load(f)
         self.p_drop = p_drop
         self.max_len = max_len
 
@@ -294,7 +298,14 @@ class UniRefDataset(Dataset):
         else:
             start = 0
             stop = len(consensus)
-        if self.structure:
+        if self.coords:
+            coords = self.structures[str(idx)]
+            dist, omega, theta, phi = process_coords(coords)
+            dist = torch.tensor(dist).float()
+            omega = torch.tensor(omega).float()
+            theta = torch.tensor(theta).float()
+            phi = torch.tensor(phi).float()
+        elif self.structure:
             sname = 'structures/{num:{fill}{width}}.npz'.format(num=idx, fill='0', width=self.n_digits)
             fname = self.data_dir + sname
             if path.isfile(fname):
@@ -313,6 +324,7 @@ class UniRefDataset(Dataset):
                     dist, omega, theta, phi = bins_to_vals(data=structure)
             if structure is None:
                 dist, omega, theta, phi = bins_to_vals(L=len(consensus))
+        if self.structure or self.coords:
             consensus = consensus[start:stop]
             dist = dist[start:stop, start:stop]
             omega = omega[start:stop, start:stop]
