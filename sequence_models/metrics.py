@@ -88,7 +88,7 @@ class LPrecision(object):
             self.res_range = [12, np.inf]
         else:
             raise ValueError("contact_range must be one of 'short', 'medium', 'long', or 'medium-long'.")
-        # contact if d < 8 angstroms, or d > 1/8**2
+        # contact if d < 8 angstroms, or d > exp(-8 ** 2 / 8 ** 2)
         self.contact_threshold = np.exp(-1)
         self.k = k
 
@@ -113,8 +113,8 @@ class LPrecision(object):
         mask = dist_mask & mask
 
         # pull the top_k most likely contacts from each prediction
-        prediction = prediction.masked_fill(mask, -1)
-        tgt = tgt.masked_fill(mask, -1)
+        prediction = prediction.masked_fill(~mask, -1)
+        tgt = tgt.masked_fill(~mask, -1)
         # Get just the upper triangular
         idx = torch.triu_indices(el, el, offset=1)
         prediction = torch.stack([p[idx[0], idx[1]] for p in prediction])  # N x n_triu
@@ -127,6 +127,8 @@ class LPrecision(object):
         top_k = ells // self.k
         n_valid = mask.sum(dim=-1).sum(dim=1)
         n_valid = np.minimum(n_valid, top_k).long()  # (N, )
+        # n_predicted = (prediction > self.contact_threshold).sum(dim=1)
+        # n_valid = np.minimum(n_valid, n_predicted).long()
         n_contacts = 0
         for ids, t, n in zip(idx, tgt, n_valid):
             n_contacts += t[ids[:n]].sum().item()
