@@ -1,8 +1,36 @@
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
-from sequence_models.convolutional import MaskedConv2d, ByteNet2d, ConditionedByteNetDecoder, MaskedConv1d
+from sequence_models.convolutional import MaskedConv2d, ByteNet2d, ConditionedByteNetDecoder, MaskedConv1d, ByteNet
 from sequence_models.layers import PositionFeedForward
+
+
+class ByteNetStructureModel(nn.Module):
+    """Takes a Bytenet embedding and converts it to a 2D structural output.
+
+    Inputs:
+        x (n, ell)
+        input_mask (n, ell), optional
+
+    Outputs:
+        structure (n, ell, ell, d_out)
+    """
+
+    def __init__(self, bytenet, d_model, d_out):
+        super().__init__()
+        self.embedder = bytenet
+        self.d_model = d_model
+        self.p = MaskedConv1d(d_model, 256, 1)
+        self.q = MaskedConv1d(d_model, 256, 1)
+        self.relu = nn.ReLU()
+        self.linear = MaskedConv2d(16, 1, 1)
+
+    def forward(self, x, input_mask=None):
+        e = self.embedder(x, input_mask=input_mask)
+        p = checkpoint(self.p, e)
+        q = checkpoint(self.q, e)
+        return p @ q.transpose(1, 2) / 256
 
 
 class Attention2d(nn.Module):
