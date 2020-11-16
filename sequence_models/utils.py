@@ -8,6 +8,12 @@ from sequence_models.constants import STOP, START, MASK, PAD
 from sequence_models.constants import PROTEIN_ALPHABET
 
 
+def warmup(n_warmup_steps):
+    def get_lr(step):
+        return min((step + 1) / n_warmup_steps, 1.0)
+    return get_lr
+
+
 def get_metrics(fname):
     with open(fname) as f:
         lines = f.readlines()
