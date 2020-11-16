@@ -3,6 +3,20 @@ import torch
 import torch.nn.functional as F
 
 
+class MaskedCosineLoss(nn.Module):
+    """Masked cosine loss between angles."""
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred, tgt, mask):
+        mask = mask.bool()
+        p = torch.masked_select(pred, mask)
+        t = torch.masked_select(tgt, mask)
+        diff = p - t
+        return torch.cos(diff).mean()
+
+
 class MaskedMSELoss(nn.MSELoss):
     """Masked mean square error loss.
 
