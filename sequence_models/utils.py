@@ -188,7 +188,7 @@ class AAIndexTokenizer(object):
 
         Returns:
             encoded: np.array
-                encoded amino acid sequence based on reduced AAIndex representation, (L*n_comp,)
+                encoded amino acid sequence based on reduced AAIndex representation, (L,n_comp)
         """
-        encoded = np.concatenate([self.red_dict[a] for a in seq])
+        encoded = np.stack([self.red_dict[a] for a in seq], 0)
         return encoded
