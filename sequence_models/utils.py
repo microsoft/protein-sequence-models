@@ -19,6 +19,14 @@ def warmup(n_warmup_steps):
     return get_lr
 
 
+def transformer_lr(n_warmup_steps):
+    factor = n_warmup_steps ** 0.5
+    def get_lr(step):
+        step += 1
+        return min(step ** (-0.5), step * n_warmup_steps ** (-1.5)) * factor
+    return get_lr
+
+
 def get_metrics(fname):
     with open(fname) as f:
         lines = f.readlines()
