@@ -127,12 +127,14 @@ class LPrecision(object):
         top_k = ells // self.k
         n_valid = mask.sum(dim=-1).sum(dim=1)
         n_valid = np.minimum(n_valid, top_k).long()  # (N, )
+        n_predicted = n_valid.sum().item()
+        if n_predicted == 0:
+            return 0, 0
         # n_predicted = (prediction > self.contact_threshold).sum(dim=1)
         # n_valid = np.minimum(n_valid, n_predicted).long()
         n_contacts = 0
         for ids, t, n in zip(idx, tgt, n_valid):
             n_contacts += t[ids[:n]].sum().item()
-        n_predicted = n_valid.sum().item()
         precision = n_contacts / n_predicted
         return precision, n_predicted
 
