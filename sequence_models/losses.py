@@ -38,6 +38,8 @@ class MaskedMSELoss(nn.MSELoss):
         # Select
         p = torch.masked_select(pred, mask)
         t = torch.masked_select(tgt, mask)
+        if len(p) == 0:
+            return pred.sum() * 0
         return super().forward(p, t)
 
 
