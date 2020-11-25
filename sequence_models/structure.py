@@ -46,7 +46,7 @@ class Attention2d(nn.Module):
         if input_mask is not None:
             attn = attn.masked_fill_(~input_mask.view(n, -1).bool(), float('-inf'))
         attn = F.softmax(attn, dim=-1).view(n, -1, 1)
-        out = (attn * x.view(n, ell * ell, -1)).mean(dim=1)
+        out = (attn * x.view(n, ell * ell, -1)).sum(dim=1)
         return out
 
 
@@ -63,7 +63,7 @@ class Attention1d(nn.Module):
         if input_mask is not None:
             attn = attn.masked_fill_(~input_mask.view(n, -1).bool(), float('-inf'))
         attn = F.softmax(attn, dim=-1).view(n, -1, 1)
-        out = (attn * x).mean(dim=1)
+        out = (attn * x).sum(dim=1)
         return out
     
     
