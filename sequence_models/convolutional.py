@@ -311,7 +311,10 @@ class ByteNet(nn.Module):
         :param causal: if True, chooses MaskedCausalConv1d() over MaskedConv1d()
         """
         super().__init__()
-        self.embedder = nn.Embedding(n_tokens, d_embedding, padding_idx=padding_idx)
+        if n_tokens is not None:
+            self.embedder = nn.Embedding(n_tokens, d_embedding, padding_idx=padding_idx)
+        else:
+            self.embedder = nn.Identity()
         self.up_embedder = PositionFeedForward(d_embedding, d_model)
         log2 = int(np.log2(r)) + 1
         dilations = [2 ** (n % log2) for n in range(n_layers)]
