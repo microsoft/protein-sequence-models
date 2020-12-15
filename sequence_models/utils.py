@@ -22,7 +22,7 @@ def transformer_lr(n_warmup_steps):
     return get_lr
 
 
-def get_metrics(fname):
+def get_metrics(fname, new=False):
     with open(fname) as f:
         lines = f.readlines()
     valid_lines = []
@@ -34,12 +34,19 @@ def get_metrics(fname):
             valid_lines.append(lines[i - 1])
             train_lines.append(last_train)
     metrics = []
+    idx_loss = 13
+    idx_accu = 16
+    idx_step = 6
+    if new:
+        idx_loss += 2
+        idx_accu += 2
+        idx_step += 2
     for t, v in zip(train_lines, valid_lines):
-        step = int(t.split()[6])
-        t_loss = float(t.split()[13])
-        t_accu = float(t.split()[16][:6])
-        v_loss = float(v.split()[13])
-        v_accu = float(v.split()[16][:6])
+        step = int(t.split()[idx_step])
+        t_loss = float(t.split()[idx_loss])
+        t_accu = float(t.split()[idx_accu][:6])
+        v_loss = float(v.split()[idx_loss])
+        v_accu = float(v.split()[idx_accu][:6])
         metrics.append((step, t_loss, t_accu, v_loss, v_accu))
     metrics = pd.DataFrame(metrics, columns=['step', 'train_loss', 'train_accu', 'valid_loss', 'valid_accu'])
     return metrics
