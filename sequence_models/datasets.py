@@ -75,7 +75,8 @@ class TAPEDataset(Dataset):
                  split: str,
                  sub_type : str = 'distance',
                  eps : float = 1e-6,
-                 in_memory: bool = False):
+                 in_memory: bool = False,
+                 max_len=700):
 
         """
         data_path : path to data directory
@@ -92,6 +93,7 @@ class TAPEDataset(Dataset):
         self.data_type = data_type
         self.sub_type = sub_type
         self.eps = eps
+        self.max_len = max_len
         
         if data_type == 'fluorescence':
             if split not in ('train', 'valid', 'test'):
@@ -174,6 +176,12 @@ class TAPEDataset(Dataset):
                 contact_map = torch.Tensor(contact_map).to(torch.int8)
                 output = torch.tensor(contact_map)
             mask = torch.tensor(~invalid_mask)
+            diff = max(len(primary) - self.max_len + 1, 1)
+            start = np.random.choice(diff)
+            end = start + self.max_len
+            primary = primary[start: end]
+            output = output[start:end, start:end]
+            mask = mask[start:end, start:end]
         return primary, output, mask
 
 
