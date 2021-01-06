@@ -293,7 +293,7 @@ class ByteNet(nn.Module):
          Shape:
             Input: (N, L,)
             input_mask: (N, L, 1), optional
-            Output: (N, L,)
+            Output: (N, L, d)
 
     """
 
