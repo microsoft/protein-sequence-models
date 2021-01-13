@@ -30,7 +30,7 @@ class trRosettaBlock(nn.Module):
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
         self.instnorm2 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
 
-    def forward(self, x, old_elu, ):
+    def forward(self, x):
         """
         Parameters:
         -----------
@@ -48,10 +48,10 @@ class trRosettaBlock(nn.Module):
         x.clone() : torch.Tensor
             copy of x
         """
-        x = F.elu(self.instnorm1(self.conv1(x)))
+        h = F.elu(self.instnorm1(self.conv1(x)))
         #         x = self.dropout1(x)
-        x = F.elu(self.instnorm2(self.conv2(x)) + old_elu)
-        return x, x.clone()
+        h = F.elu(self.instnorm2(self.conv2(h)) + x)
+        return h
 
 
 class trRosetta(nn.Module):
@@ -95,11 +95,11 @@ class trRosetta(nn.Module):
         if model_id is not None:
             self.load_weights(model_id)
 
-    def forward(self, x, ):
+    def forward(self, x, input_mask=None):
         """
         Parameters:
         -----------
-        x : torch.Tensor, (1, 526, len(sequence), len(sequence))
+        x : torch.Tensor, (batch, 526, len(sequence), len(sequence))
             inputs after trRosettaPreprocessing
     
         Returns:
@@ -119,30 +119,32 @@ class trRosetta(nn.Module):
         x : torch.Tensor
             outputs before calculating final layers
         """
-        x = F.elu(self.instnorm0(self.conv0(x)))
-        old_elu = x.clone()
+        if input_mask is not None:
+            x = x * input_mask
+        h = F.elu(self.instnorm0(self.conv0(x)))
         for layer in self.layers:
-            x, old_elu = layer(x, old_elu)
-
+            h = layer(h)
+            if input_mask is not None:
+                h = h * input_mask
         if self.decoder:
-            logits_theta = self.conv_theta(x)
+            logits_theta = self.conv_theta(h)
             theta_probs = self.softmax(logits_theta)
 
-            logits_phi = self.conv_phi(x)
+            logits_phi = self.conv_phi(h)
             phi_probs = self.softmax(logits_phi)
 
             # symmetrize
-            x = 0.5 * (x + torch.transpose(x, 2, 3))
+            h = 0.5 * (h + torch.transpose(h, 2, 3))
 
-            logits_dist = self.conv_dist(x)
+            logits_dist = self.conv_dist(h)
             dist_probs = self.softmax(logits_dist)
 
-            logits_omega = self.conv_omega(x)
+            logits_omega = self.conv_omega(h)
             omega_probs = self.softmax(logits_omega)
 
             return dist_probs, theta_probs, phi_probs, omega_probs
         else:
-            return x
+            return h
 
     def load_weights(self, model_id):
         
@@ -199,7 +201,7 @@ class trRosettaEnsemble(nn.Module):
 
 class trRosettaDist(nn.Module):
     """trRosetta for distance only, does not use pretrained weights"""
-    def __init__(self, n2d_layers=61, hdim=128, decoder=True):
+    def __init__(self, n2d_layers=61, hdim=128, decoder=True, d_out=1):
         """
         Args:
             n2d_layers: int
@@ -226,7 +228,7 @@ class trRosettaDist(nn.Module):
         self.decoder = decoder
 
         if decoder:
-            self.conv_dist = nn.Conv2d(64, 1, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
+            self.conv_dist = nn.Conv2d(64, d_out, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
 
     def forward(self, x, ):
         """
@@ -252,6 +254,7 @@ class trRosettaDist(nn.Module):
 
         if self.decoder:
             # symmetrize
+            ## TODO: Some things need to be symmetrical and others don't
             x = 0.5 * (x + torch.transpose(x, 2, 3))
             dist = self.conv_dist(x).squeeze(1)
             return dist
