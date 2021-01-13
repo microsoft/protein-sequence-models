@@ -444,15 +444,16 @@ def get_node_features(omega, theta, phi):
         return torch.zeros(omega.shape[0], 10)
 
     # omega is symmetric, n1 is omega angle relative to prior
-    n1 = torch.cat((torch.tensor([0.]), torch.diagonal(omega, offset=1)))
+    device = omega.device
+    n1 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(omega, offset=1)))
     
     # theta is asymmetric, n2 and n3 relative to prior
-    n2 = torch.cat((torch.diagonal(theta, offset=1), torch.tensor([0.])))
-    n3 = torch.cat((torch.tensor([0.]), torch.diagonal(theta, offset=-1)))
+    n2 = torch.cat((torch.diagonal(theta, offset=1), torch.tensor([0.], device=device)))
+    n3 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(theta, offset=-1)))
     
     # phi is asymmetric n4 and n5 relative to prior
-    n4 = torch.cat((torch.diagonal(phi, offset=1), torch.tensor([0.])))
-    n5 = torch.cat((torch.tensor([0.]), torch.diagonal(phi, offset=-1)))
+    n4 = torch.cat((torch.diagonal(phi, offset=1), torch.tensor([0.], device=device)))
+    n5 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(phi, offset=-1)))
     
     ns = torch.stack([n1, n2, n3, n4, n5], dim=1)
     
