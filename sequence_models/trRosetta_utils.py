@@ -72,7 +72,7 @@ class trRosettaPreprocessing():
         processed_seqs = []
         for seq in seqs:
             processed_seqs.append([self.ohe_dict[i] for i in seq])
-        return torch.Tensor(np.array(processed_seqs)).to(torch.int8)
+        return torch.Tensor(np.array(processed_seqs)).long()
 
     def _reweight_py(self, msa1hot, cutoff, eps=1e-9):
         """Scatter one hot encoding
@@ -204,7 +204,7 @@ class trRosettaPreprocessing():
             input for trRosetta
         """
         if self.ohe_dict is not None:
-            x = self._convert_ohe(x, self.ohe_dict).reshape(len(x), -1)
+            x = self._convert_ohe(x).reshape(len(x), -1)
         x = F.one_hot(x, len(trR_ALPHABET)).unsqueeze(0).float()
         # x = self._one_hot_embedding(x, len(trR_ALPHABET))
         w = self._reweight_py(x, self.wmin)
