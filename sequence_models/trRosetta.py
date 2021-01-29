@@ -95,7 +95,7 @@ class trRosetta(nn.Module):
         if model_id is not None:
             self.load_weights(model_id)
 
-    def forward(self, x, input_mask=None):
+    def forward(self, x, input_mask=None, softmax=True):
         """
         Parameters:
         -----------
@@ -128,21 +128,23 @@ class trRosetta(nn.Module):
                 h = h * input_mask
         if self.decoder:
             logits_theta = self.conv_theta(h)
-            theta_probs = self.softmax(logits_theta)
 
             logits_phi = self.conv_phi(h)
-            phi_probs = self.softmax(logits_phi)
 
             # symmetrize
             h = 0.5 * (h + torch.transpose(h, 2, 3))
 
             logits_dist = self.conv_dist(h)
-            dist_probs = self.softmax(logits_dist)
 
             logits_omega = self.conv_omega(h)
-            omega_probs = self.softmax(logits_omega)
-
-            return dist_probs, theta_probs, phi_probs, omega_probs
+            if not softmax:
+                return logits_dist, logits_theta, logits_phi, logits_omega
+            else:
+                theta_probs = self.softmax(logits_theta)
+                phi_probs = self.softmax(logits_phi)
+                dist_probs = self.softmax(logits_dist)
+                omega_probs = self.softmax(logits_omega)
+                return dist_probs, theta_probs, phi_probs, omega_probs
         else:
             return h
 
