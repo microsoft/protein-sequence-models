@@ -14,7 +14,7 @@ from torch.utils.data import Dataset
 import pandas as pd
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import trR_ALPHABET
+from sequence_models.constants import trR_ALPHABET, DIST_BINS, PHI_BINS, THETA_BINS, OMEGA_BINS
 from sequence_models.gnn import bins_to_vals
 from sequence_models.pdb_utils import process_coords
 
@@ -271,7 +271,8 @@ class UniRefDataset(Dataset):
     - 'lengths_and_offsets.npz': byte offsets for the 'consensus.fasta' and sequence lengths
     """
 
-    def __init__(self, data_dir: str, split: str, structure=False, pdb=False, coords=False, p_drop=0.0, max_len=2048):
+    def __init__(self, data_dir: str, split: str, structure=False, pdb=False, coords=False, bins=False,
+                 p_drop=0.0, max_len=2048):
         self.data_dir = data_dir
         self.split = split
         self.structure = structure
@@ -281,7 +282,8 @@ class UniRefDataset(Dataset):
         metadata = np.load(self.data_dir + 'lengths_and_offsets.npz')
         self.offsets = metadata['seq_offsets']
         self.pdb = pdb
-        if self.pdb:
+        self.bins = bins
+        if self.pdb or self.bins:
             self.n_digits = 6
         else:
             self.n_digits = 8
@@ -323,6 +325,15 @@ class UniRefDataset(Dataset):
             if structure is not None:
                 if np.random.random() < self.p_drop:
                     structure = None
+                elif self.bins:
+                    dist = structure['dist']
+                    dist = torch.tensor(np.digitize(dist, DIST_BINS[1:]) % (len(DIST_BINS) - 1))
+                    omega = structure['omega']
+                    omega = torch.tensor(np.digitize(omega, OMEGA_BINS[1:]) % (len(OMEGA_BINS) - 1))
+                    theta = structure['theta']
+                    theta = torch.tensor(np.digitize(theta, THETA_BINS[1:]) % (len(THETA_BINS) - 1))
+                    phi = structure['phi']
+                    phi = torch.tensor(np.digitize(phi, PHI_BINS[1:]) % (len(PHI_BINS) - 1))
                 elif self.pdb:
                     dist = torch.tensor(structure['dist']).float()
                     omega = torch.tensor(structure['omega']).float()
