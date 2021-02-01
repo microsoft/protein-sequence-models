@@ -75,7 +75,8 @@ class MaskedCrossEntropyLoss(nn.CrossEntropyLoss):
 
     def forward(self, pred, tgt, mask):
         # Make sure we have that empty last dimension
-        mask = mask.view(*mask.shape[:2], 1)
+        if len(mask.shape) == len(pred.shape) - 1:
+            mask = mask.unsqueeze(-1)
         # Make sure mask is boolean
         mask = mask.bool()
         # Number of locations to calculate loss
