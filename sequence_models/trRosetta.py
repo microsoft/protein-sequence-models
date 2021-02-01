@@ -13,7 +13,7 @@ def pad_size(d, k, s):
 
 class trRosettaBlock(nn.Module):
         
-    def __init__(self, dilation):
+    def __init__(self, dilation, track_running_stats=False):
         
         """Simple convolution block
         
@@ -25,10 +25,10 @@ class trRosettaBlock(nn.Module):
 
         super(trRosettaBlock, self).__init__()
         self.conv1 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
-        self.instnorm1 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
+        self.instnorm1 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
         #         self.dropout1 = nn.Dropout2d(0.15)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
-        self.instnorm2 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
+        self.instnorm2 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
 
     def forward(self, x):
         """
@@ -58,7 +58,7 @@ class trRosetta(nn.Module):
     
     """trRosetta for single model"""
 
-    def __init__(self, n2d_layers=61, model_id='a', decoder=True):
+    def __init__(self, n2d_layers=61, model_id='a', decoder=True, track_running_stats=False):
         """
         Parameters:
         -----------
@@ -73,12 +73,12 @@ class trRosetta(nn.Module):
         super(trRosetta, self).__init__()
 
         self.conv0 = nn.Conv2d(526, 64, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
-        self.instnorm0 = nn.InstanceNorm2d(64, eps=1e-06, affine=True)
+        self.instnorm0 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
 
         dilation = 1
         layers = []
         for _ in range(n2d_layers):
-            layers.append(trRosettaBlock(dilation))
+            layers.append(trRosettaBlock(dilation, track_running_stats=track_running_stats))
             dilation *= 2
             if dilation > 16:
                 dilation = 1
