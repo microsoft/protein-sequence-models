@@ -209,6 +209,7 @@ class StructureCollater(object):
                 phi = torch.flip(phi, [0, 1])
             # process features
             V = get_node_features(omega, theta, phi)
+            dist.fill_diagonal_(np.nan)
             E_idx = get_k_neighbors(dist, self.n_connections)
             E = get_edge_features(dist, omega, theta, phi, E_idx)
             str_mask = get_mask(E)
@@ -226,7 +227,8 @@ class StructureCollater(object):
 
 class StructureOutputCollater(object):
 
-    def __init__(self, sequence_collater: SimpleCollater):
+    def __init__(self, sequence_collater: SimpleCollater, exp=True):
+        self.exp = exp
         self.sequence_collater = sequence_collater
 
     def _pad(self, squares, ells, value=0.0):
@@ -240,8 +242,11 @@ class StructureOutputCollater(object):
         sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
         ells = [len(s) for s in sequences]
         seqs = self.sequence_collater._prep(sequences)[0]
-        dists = [torch.exp(-d ** 2 / 64) for d in dists]
-        masks = [~torch.isnan(dist) for dist in dists]
+        if self.exp:
+            dists = [torch.exp(-d ** 2 / 64) for d in dists]
+            masks = [~torch.isnan(dist) for dist in dists]
+        else:
+            masks = [torch.ones_like(dist).bool() for dist in dists]
         masks = self._pad(masks, ells, value=False)
         dists = self._pad(dists, ells)
         omegas = self._pad(omegas, ells)
