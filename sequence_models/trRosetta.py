@@ -30,7 +30,7 @@ class trRosettaBlock(nn.Module):
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
         self.instnorm2 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
 
-    def forward(self, x):
+    def forward(self, x, input_mask=None):
         """
         Parameters:
         -----------
@@ -48,8 +48,12 @@ class trRosettaBlock(nn.Module):
         x.clone() : torch.Tensor
             copy of x
         """
+        if input_mask is not None:
+            x = x * input_mask
         h = F.elu(self.instnorm1(self.conv1(x)))
         #         x = self.dropout1(x)
+        if input_mask is not None:
+            h = h * input_mask
         h = F.elu(self.instnorm2(self.conv2(h)) + x)
         return h
 
@@ -123,7 +127,7 @@ class trRosetta(nn.Module):
             x = x * input_mask
         h = F.elu(self.instnorm0(self.conv0(x)))
         for layer in self.layers:
-            h = layer(h)
+            h = layer(h, input_mask=input_mask)
             if input_mask is not None:
                 h = h * input_mask
         if self.decoder:
