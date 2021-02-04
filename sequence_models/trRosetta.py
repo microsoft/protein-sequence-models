@@ -13,7 +13,7 @@ def pad_size(d, k, s):
 
 class trRosettaBlock(nn.Module):
         
-    def __init__(self, dilation, track_running_stats=False):
+    def __init__(self, dilation, track_running_stats=False, p_dropout=0.0):
         
         """Simple convolution block
         
@@ -26,7 +26,7 @@ class trRosettaBlock(nn.Module):
         super(trRosettaBlock, self).__init__()
         self.conv1 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
         self.instnorm1 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
-        #         self.dropout1 = nn.Dropout2d(0.15)
+        self.dropout1 = nn.Dropout2d(p_dropout)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
         self.instnorm2 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
 
@@ -51,7 +51,7 @@ class trRosettaBlock(nn.Module):
         if input_mask is not None:
             x = x * input_mask
         h = F.elu(self.instnorm1(self.conv1(x)))
-        #         x = self.dropout1(x)
+        h = self.dropout1(h)
         if input_mask is not None:
             h = h * input_mask
         h = F.elu(self.instnorm2(self.conv2(h)) + x)
@@ -62,7 +62,7 @@ class trRosetta(nn.Module):
     
     """trRosetta for single model"""
 
-    def __init__(self, n2d_layers=61, model_id='a', decoder=True, track_running_stats=False):
+    def __init__(self, n2d_layers=61, model_id='a', decoder=True, track_running_stats=False, p_dropout=0.0):
         """
         Parameters:
         -----------
@@ -82,7 +82,7 @@ class trRosetta(nn.Module):
         dilation = 1
         layers = []
         for _ in range(n2d_layers):
-            layers.append(trRosettaBlock(dilation, track_running_stats=track_running_stats))
+            layers.append(trRosettaBlock(dilation, track_running_stats=track_running_stats, p_dropout=p_dropout))
             dilation *= 2
             if dilation > 16:
                 dilation = 1
