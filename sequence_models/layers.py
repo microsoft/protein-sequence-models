@@ -1,6 +1,9 @@
 from typing import List
 
 import torch.nn as nn
+import torch.nn.functional as F
+import torch
+import numpy as np
 
 
 class PositionFeedForward(nn.Module):
@@ -21,6 +24,28 @@ class PositionFeedForward2d(nn.Module):
 
     def forward(self, x):
         return self.conv(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+
+
+class MaskedInstanceNorm2d(nn.InstanceNorm2d):
+    ### Expects square inputs before and after masking!!
+
+    def __init__(self, n_dims, affine=True, eps=1e-6):
+        super().__init__(n_dims, affine=affine, eps=eps)
+
+
+    def forward(self, x, input_mask=None):
+        if input_mask is None:
+            return super().forward(x)
+        input_mask = input_mask.bool()
+        normed = []
+        _, _, max_len, _ = x.shape
+        for input, mask in zip(x, input_mask):
+            input = torch.masked_select(input, mask)
+            el = int(np.sqrt(input.shape[0] // self.num_features))
+            input = input.reshape(1, self.num_features, el, el)
+            n = max_len - el
+            normed.append(F.pad(super().forward(input), (0, n, 0, n), value=0))
+        return torch.cat(normed, dim=0)
 
 
 class FCStack(nn.Sequential):

@@ -5,6 +5,7 @@ import torch.nn.functional as F
 
 from sequence_models.trRosetta_utils import *
 from sequence_models.constants import WEIGHTS_DIR
+from sequence_models.layers import MaskedInstanceNorm2d
 
 
 def pad_size(d, k, s):
@@ -13,7 +14,7 @@ def pad_size(d, k, s):
 
 class trRosettaBlock(nn.Module):
         
-    def __init__(self, dilation, track_running_stats=False, p_dropout=0.0):
+    def __init__(self, dilation, p_dropout=0.0):
         
         """Simple convolution block
         
@@ -25,10 +26,10 @@ class trRosettaBlock(nn.Module):
 
         super(trRosettaBlock, self).__init__()
         self.conv1 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
-        self.instnorm1 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
+        self.instnorm1 = MaskedInstanceNorm2d(64, eps=1e-06, affine=True)
+        self.instnorm2 = MaskedInstanceNorm2d(64, eps=1e-06, affine=True)
         self.dropout1 = nn.Dropout2d(p_dropout)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
-        self.instnorm2 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
 
     def forward(self, x, input_mask=None):
         """
@@ -50,11 +51,11 @@ class trRosettaBlock(nn.Module):
         """
         if input_mask is not None:
             x = x * input_mask
-        h = F.elu(self.instnorm1(self.conv1(x)))
+        h = F.elu(self.instnorm1(self.conv1(x), input_mask=input_mask))
         h = self.dropout1(h)
         if input_mask is not None:
             h = h * input_mask
-        h = F.elu(self.instnorm2(self.conv2(h)) + x)
+        h = F.elu(self.instnorm2(self.conv2(h), input_mask=input_mask) + x)
         return h
 
 
@@ -62,7 +63,7 @@ class trRosetta(nn.Module):
     
     """trRosetta for single model"""
 
-    def __init__(self, n2d_layers=61, model_id='a', decoder=True, track_running_stats=False, p_dropout=0.0):
+    def __init__(self, n2d_layers=61, model_id='a', decoder=True, p_dropout=0.0):
         """
         Parameters:
         -----------
@@ -77,12 +78,12 @@ class trRosetta(nn.Module):
         super(trRosetta, self).__init__()
 
         self.conv0 = nn.Conv2d(526, 64, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
-        self.instnorm0 = nn.InstanceNorm2d(64, eps=1e-06, affine=True, track_running_stats=track_running_stats)
+        self.instnorm0 = MaskedInstanceNorm2d(64, eps=1e-06, affine=True)
 
         dilation = 1
         layers = []
         for _ in range(n2d_layers):
-            layers.append(trRosettaBlock(dilation, track_running_stats=track_running_stats, p_dropout=p_dropout))
+            layers.append(trRosettaBlock(dilation, p_dropout=p_dropout))
             dilation *= 2
             if dilation > 16:
                 dilation = 1
@@ -125,7 +126,8 @@ class trRosetta(nn.Module):
         """
         if input_mask is not None:
             x = x * input_mask
-        h = F.elu(self.instnorm0(self.conv0(x)))
+        h = self.conv0(x)
+        h = F.elu(self.instnorm0(h, input_mask=input_mask))
         for layer in self.layers:
             h = layer(h, input_mask=input_mask)
             if input_mask is not None:
