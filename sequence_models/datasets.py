@@ -160,7 +160,12 @@ class TAPEDataset(Dataset):
         if self.data_type in ['secondary_structure']:
             # pad with -1s because of cls/sep tokens
             output = torch.Tensor(item[self.output_label],).to(torch.int8)
-    
+            diff = max(len(primary) - self.max_len + 1, 1)
+            start = np.random.choice(diff)
+            end = start + self.max_len
+            primary = primary[start: end]
+            output = output[start:end]
+
         if self.data_type in ['contact']:
             # -1 is ignore, 0 in no contact, 1 is contact
             valid_mask = item['valid_mask']
