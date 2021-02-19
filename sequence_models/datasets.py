@@ -4,6 +4,7 @@ import lmdb
 import subprocess
 import string
 import json
+import os
 from os import path
 import pickle as pkl
 from scipy.spatial.distance import squareform, pdist

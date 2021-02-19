@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD, START, STOP, MASK, 
+from sequence_models.constants import PAD, START, STOP, MASK
 from sequence_models.constants import ALL_AAS
 from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
 
