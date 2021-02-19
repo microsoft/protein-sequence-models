@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD, START, STOP, MASK
+from sequence_models.constants import PAD, START, STOP, MASK, 
 from sequence_models.constants import ALL_AAS
 from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
 
@@ -253,3 +253,97 @@ class StructureOutputCollater(object):
         thetas = self._pad(thetas, ells)
         phis = self._pad(phis, ells)
         return seqs, dists, omegas, thetas, phis, masks
+
+    
+class TAPE2trRosettaCollater(SimpleCollater):
+
+    def __init__(self, alphabet: str, pad=True):
+        super().__init__(alphabet, pad=pad)
+        self.featurization = trRosettaPreprocessing(alphabet)
+
+    def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
+        data = tuple(zip(*batch))
+        if len(data) == 0:
+            return data
+        sequences = data[0]
+        sequences = [i.replace('X', '-') for i in sequences] # get rid of X found in secondary_stucture data
+        lens = [len(i) for i in sequences]
+        max_len = max(lens)
+        prepped = self._prep(sequences)[0]
+        prepped = torch.stack([self.featurization.process(i.view(1,-1)).squeeze(0) for i in prepped])
+        y = data[1]
+        tgt_mask = data[2]
+        src_mask = [torch.ones(i, i).bool() for i in lens]
+        src_mask = [F.pad(mask_i,
+                          (0, max_len - len(mask_i), 0, max_len - len(mask_i)), value=False) for mask_i in src_mask]
+        src_mask = torch.stack(src_mask, dim=0).unsqueeze(1)
+        
+        if isinstance(y[0], float): # stability or fluorescence
+            y = torch.tensor(y).unsqueeze(-1)
+            tgt_mask = torch.ones_like(y)
+
+        elif isinstance(y[0], int): # remote homology
+            y = torch.tensor(y).long()
+            tgt_mask = torch.ones_like(y)
+
+        elif len(y[0].shape) == 1:  # secondary structure
+            tgt_mask = [torch.ones(i) for i in lens]
+            y = _pad(y, 0).long()
+            tgt_mask = _pad(tgt_mask, 0).long()
+            
+        elif len(y[0].shape) == 2:  # contact
+            max_len = max(len(i) for i in y)
+            tgt_mask = [F.pad(mask_i,
+                      (0, max_len - len(mask_i), 0, max_len - len(mask_i)), value=False) for mask_i in tgt_mask]
+            tgt_mask = torch.stack(tgt_mask, dim=0)
+            y = [F.pad(yi, (0, max_len - len(yi), 0, max_len - len(yi)), value=-1) for yi in y]
+            y = torch.stack(y, dim=0).long()
+        return prepped.float(), y, tgt_mask, src_mask
+    
+
+class MSAGapCollater(object):
+
+    def __init__(self, alphabet, input_type, output_type, n_connections=20):
+        """
+        Args:
+            alphabet: str,
+                protein alphabet
+            input_type: str
+                type of input data, 'structure' or 'sequence'
+            output_type:
+                type of output data, 'gap_prob' or 'lm'
+            n_connections: int
+                if structure is input data type, number of connections
+        """
+        # collaters
+        self.simple_collater = SimpleCollater(alphabet=alphabet, pad=True)
+        self.structure_collater = StructureCollater(self.simple_collater, n_connections=n_connections)
+
+        # data type
+        self.input_type = input_type
+        self.output_type = output_type
+
+        # grab tokenizer just in case
+        self.tokenizer = Tokenizer(alphabet)
+
+    def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
+        if self.input_type == 'structure':
+            seq, dist, omega, theta, phi, y, y_mask = tuple(zip(*batch))
+            seq = [self.tokenizer.untokenize(i.numpy()) for i in seq]
+            rebatch = [(seq[i], dist[i], omega[i], theta[i], phi[i]) for i in range(len(seq))]
+            seqs, nodes, edges, connections, edge_mask = self.structure_collater.__call__(rebatch)
+            mask_x = None
+            X = (seqs, nodes, edges, connections, edge_mask)
+
+        elif self.input_type == 'sequence':  # by design, y is gap prob
+            seq, y = tuple(zip(*batch))
+            mask_x = [torch.ones_like(i).bool() for i in seq]
+            seq = _pad(seq, 20)
+            mask_x = _pad(mask_x, False)
+            X = seq
+
+        if (self.output_type == 'gab-prob'):
+            mask_y = [torch.ones_like(i).bool() for i in y]
+            y = _pad(y, 0)
+            mask_y = _pad(mask_y, False)
+        return X + (mask_x, y, mask_y)
