@@ -342,7 +342,7 @@ class MSAGapCollater(object):
             mask_x = _pad(mask_x, False)
             X = seq
 
-        if (self.output_type == 'gab-prob'):
+        if (self.output_type == 'gap-prob'):
             mask_y = [torch.ones_like(i).bool() for i in y]
             y = _pad(y, 0)
             mask_y = _pad(mask_y, False)
