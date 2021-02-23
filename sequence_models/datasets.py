@@ -4,6 +4,7 @@ import lmdb
 import subprocess
 import string
 import json
+import os
 from os import path
 import pickle as pkl
 from scipy.spatial.distance import squareform, pdist
@@ -369,3 +370,129 @@ class UniRefDataset(Dataset):
             return consensus, dist, omega, theta, phi
         consensus = consensus[start:stop]
         return (consensus, )
+    
+    
+class MSAGapDataset(Dataset):
+    """Build dataset for trRosetta data: gap-prob and lm/mlm"""
+    def __init__(self, data_dir, dataset, task, pdb=False, filtered_y=False, filtered_msa=False, npz_dir=None,
+                 pdb_dir=None):
+        """
+        Args:
+            data_dir: str,
+                path to trRosetta data
+            dataset: str,
+                train, valid, or test
+            task: str,
+                gap-prob or lm
+            pdb: bool,
+                if True, return structure as inputs; if False, return random sequence
+                if pdb is False, you must have task = gab-prob
+            filtered_y: bool,
+                if True, use gap probabilities from filtered MSA (task = gap-prob)
+                or select sequence from filtered MSA (task = lm)
+                if False, use unfiltered MSA
+                Filtered is defined as removing sequences from MSA where gaps only
+                exists on ends of sequences
+            filtered_msa: bool,
+                if True, use filtered msa; if False, use unfiltered msa
+            npz_dir: str,
+                if you have a specified npz directory
+            pdb_dir: str,
+                if you have a specified pdb directory
+        """
+        filename = data_dir + dataset + 'list.txt'
+        pdb_ids = np.loadtxt(filename, dtype=str)
+
+        # choose to use filtered data or not
+        self.filtered_msa = filtered_msa
+        self.filtered_y = filtered_y
+
+        # get npz dir
+        if npz_dir:
+            self.npz_dir = npz_dir
+        else:
+            self.npz_dir = data_dir + 'npz/'
+        if self.filtered_msa or self.filtered_y:
+            all_npzs = os.listdir(data_dir + 'npz_gaps/')
+            self.npz_gap_dir = data_dir + 'npz_gaps/'
+        else:
+            all_npzs = os.listdir(self.npz_dir)
+        selected_npzs = [i for i in pdb_ids if i + '.npz' in all_npzs]
+        self.filenames = selected_npzs  # ids of samples to include
+
+        # get pdb dir
+        self.pdb = pdb
+        if pdb_dir:
+            self.pdb_dir = pdb_dir
+        else:
+            if self.pdb:
+                self.pdb_dir = data_dir + 'structure/'
+
+        self.task = task
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):
+        filename = self.filenames[idx]
+        base_seq = np.load(self.npz_dir + filename + ".npz")['msa'][0]
+
+        # get msa from npz
+        if self.filtered_msa:
+            msa = np.load(self.npz_gap_dir + filename + ".npz")['msa']
+        else:
+            msa = np.load(self.npz_dir + filename + ".npz")['msa']
+
+        # choose y type
+        if self.task == "gap-prob":
+            if self.filtered_y:
+                y = np.load(self.npz_gap_dir + filename + ".npz")['y']
+                y_mask = None  # questionable ???
+            else:
+                y = torch.FloatTensor(np.sum(msa == 20, axis=0) / msa.shape[0])
+                y_mask = None
+        else:  # lm
+            y, y_mask = self._get_lm_y(filename, self.filtered_y)
+
+        # choose X type
+        if self.pdb:  # use structure for X
+            dist, omega, theta, phi = np.load(self.pdb_dir + filename + ".npy", allow_pickle=True)[()]
+            seq = torch.LongTensor(base_seq)
+            return seq, dist, omega, theta, phi, y, y_mask
+
+        else:  # use just seq for X (THIS IS ONLY USED FOR GAP PROB)
+            if self.task == "gap-prob":
+                chosen = False
+                while not chosen:
+                    msa_num = np.random.randint(msa.shape[0])
+                    x = msa[msa_num]
+                    seq_mask = x != 20
+                    # only want num of gap < 20%
+                    chosen = np.sum(seq_mask) / x.shape[0] > 0.8
+                x = torch.LongTensor(x)
+                seq_mask = torch.BoolTensor(seq_mask)
+                return x[seq_mask], y[seq_mask]
+            else:
+                raise ValueError("""Warning - input type and output type are not compatible, 
+                    pdb=False can only be used with task gap-prob""")
+
+    def _get_lm_y(self, filename, filter_gap):
+        if filter_gap:
+            msa = np.load(self.npz_gap_dir + filename + ".npz")['msa']
+            y = torch.LongTensor(msa[np.random.choice(msa.shape[0])])  # get random seq from msa
+            y_mask = []
+            for i in range(len(y)):
+                if y[i] != 20:
+                    y_mask += [False] * (i)
+                    break
+            for j in range(len(y) - 1, -1, -1):
+                if y[j] != 20:
+                    y_mask += [True] * (j - i + 1)
+                    y_mask += [False] * (len(y) - 1 - j)
+                    break
+            return y, torch.BoolTensor(y_mask)
+        else:
+            msa = np.load(self.npz_dir + filename + ".npz")['msa']
+            y = torch.LongTensor(msa[np.random.choice(msa.shape[0])])  # get random seq from msa
+            y_mask = None
+            return y, y_mask
