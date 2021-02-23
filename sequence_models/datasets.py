@@ -156,7 +156,11 @@ class TAPEDataset(Dataset):
         
         if self.data_type in ['remote_homology']:
             output = item[self.output_label]
-        
+            diff = max(len(primary) - self.max_len + 1, 1)
+            start = np.random.choice(diff)
+            end = start + self.max_len
+            primary = primary[start: end]
+
         if self.data_type in ['secondary_structure']:
             # pad with -1s because of cls/sep tokens
             output = torch.Tensor(item[self.output_label],).to(torch.int8)
@@ -334,8 +338,16 @@ class UniRefDataset(Dataset):
                     dist = structure['dist']
                     dist = torch.tensor(np.digitize(dist, DIST_BINS[1:]) % (len(DIST_BINS) - 1))
                     omega = structure['omega']
+                    idx = np.where(omega == omega)
+                    jdx = np.where(omega[idx] < 0)[0]
+                    idx = tuple(i[jdx] for i in idx)
+                    omega[idx] = 2 * np.pi + omega[idx]
                     omega = torch.tensor(np.digitize(omega, OMEGA_BINS[1:]) % (len(OMEGA_BINS) - 1))
                     theta = structure['theta']
+                    idx = np.where(theta == theta)
+                    jdx = np.where(theta[idx] < 0)[0]
+                    idx = tuple(i[jdx] for i in idx)
+                    theta[idx] = 2 * np.pi + theta[idx]
                     theta = torch.tensor(np.digitize(theta, THETA_BINS[1:]) % (len(THETA_BINS) - 1))
                     phi = structure['phi']
                     phi = torch.tensor(np.digitize(phi, PHI_BINS[1:]) % (len(PHI_BINS) - 1))
