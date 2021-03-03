@@ -271,6 +271,26 @@ class FFDataset(Dataset):
         return seqs
 
 
+def trr_bin(dist, omega, theta, phi):
+    dist = torch.tensor(np.digitize(dist, DIST_BINS[1:]) % (len(DIST_BINS) - 1))
+    idx = np.where(omega == omega)
+    jdx = np.where(omega[idx] < 0)[0]
+    idx = tuple(i[jdx] for i in idx)
+    omega[idx] = 2 * np.pi + omega[idx]
+    omega = torch.tensor(np.digitize(omega, OMEGA_BINS[1:]) % (len(OMEGA_BINS) - 1))
+    idx = np.where(theta == theta)
+    jdx = np.where(theta[idx] < 0)[0]
+    idx = tuple(i[jdx] for i in idx)
+    theta[idx] = 2 * np.pi + theta[idx]
+    theta = torch.tensor(np.digitize(theta, THETA_BINS[1:]) % (len(THETA_BINS) - 1))
+    phi = torch.tensor(np.digitize(phi, PHI_BINS[1:]) % (len(PHI_BINS) - 1))
+    idx = torch.where(dist == 0)
+    omega[idx] = 0
+    theta[idx] = 0
+    phi[idx] = 0
+    return dist, omega, theta, phi
+
+
 class UniRefDataset(Dataset):
     """
     Dataset that pulls from UniRef/Uniclust downloads.
@@ -335,28 +355,13 @@ class UniRefDataset(Dataset):
             if structure is not None:
                 if np.random.random() < self.p_drop:
                     structure = None
-                elif self.bins:
-                    dist = structure['dist']
-                    dist = torch.tensor(np.digitize(dist, DIST_BINS[1:]) % (len(DIST_BINS) - 1))
-                    omega = structure['omega']
-                    idx = np.where(omega == omega)
-                    jdx = np.where(omega[idx] < 0)[0]
-                    idx = tuple(i[jdx] for i in idx)
-                    omega[idx] = 2 * np.pi + omega[idx]
-                    omega = torch.tensor(np.digitize(omega, OMEGA_BINS[1:]) % (len(OMEGA_BINS) - 1))
-                    theta = structure['theta']
-                    idx = np.where(theta == theta)
-                    jdx = np.where(theta[idx] < 0)[0]
-                    idx = tuple(i[jdx] for i in idx)
-                    theta[idx] = 2 * np.pi + theta[idx]
-                    theta = torch.tensor(np.digitize(theta, THETA_BINS[1:]) % (len(THETA_BINS) - 1))
-                    phi = structure['phi']
-                    phi = torch.tensor(np.digitize(phi, PHI_BINS[1:]) % (len(PHI_BINS) - 1))
                 elif self.pdb:
                     dist = torch.tensor(structure['dist']).float()
                     omega = torch.tensor(structure['omega']).float()
                     theta = torch.tensor(structure['theta']).float()
                     phi = torch.tensor(structure['phi']).float()
+                    if self.bins:
+                        dist, omega, theta, phi = trr_bin(dist, omega, theta, phi)
                 else:
                     dist, omega, theta, phi = bins_to_vals(data=structure)
             if structure is None:
@@ -370,6 +375,78 @@ class UniRefDataset(Dataset):
             return consensus, dist, omega, theta, phi
         consensus = consensus[start:stop]
         return (consensus, )
+
+
+class TRRDataset(Dataset):
+    def __init__(self, data_dir, dataset, return_msa=True, bin=True, untokenize=False, max_len=2048):
+        """
+        Args:
+            data_dir: str,
+                path to trRosetta data
+            dataset: str,
+                train, valid
+            return_msa: bool
+                return full MSA or single sequence
+            bin: bool
+                bin structure matrices
+            tokenizer:
+                Use this to untokenize sequence if desired
+        """
+        filenames = data_dir + dataset + '_files.txt'
+        self.filenames = np.loadtxt(filenames, dtype=str)
+        self.data_dir = data_dir
+        self.return_msa = return_msa
+        self.bin = bin
+        self.max_len = max_len
+        if untokenize:
+            self.tokenizer = Tokenizer(trR_ALPHABET)
+        else:
+            self.tokenizer = None
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):
+        filename = self.data_dir + 'npz/' + self.filenames[idx]
+        data = np.load(filename)
+        if self.return_msa:
+            s = torch.tensor(data['msa'])
+            ell = s.shape[1]
+        else:
+            s = data['msa'][0]
+            if self.tokenizer is not None:
+                s = self.tokenizer.untokenize(s)
+            ell = len(s)
+        if ell - self.max_len > 0:
+            start = np.random.choice(ell - self.max_len)
+            stop = start + self.max_len
+        else:
+            start = 0
+            stop = ell
+        dist = data['dist6d']
+        omega = data['omega6d']
+        theta = data['theta6d']
+        phi = data['phi6d']
+        if self.return_msa:
+            s = s[:, start:stop]
+        else:
+            s = s[start:stop]
+        if self.bin:
+            dist, omega, theta, phi = trr_bin(dist, omega, theta, phi)
+        else:
+            idx = np.where(dist == 0)
+            dist[idx] = 20.0
+            dist = torch.tensor(dist).float()
+            omega = torch.tensor(omega).float()
+            theta = torch.tensor(theta).float()
+            phi = torch.tensor(phi).float()
+        dist = dist[start:stop, start:stop]
+        omega = omega[start:stop, start:stop]
+        theta = theta[start:stop, start:stop]
+        phi = phi[start:stop, start:stop]
+
+        return s, dist, omega, theta, phi
+
     
     
 class MSAGapDataset(Dataset):
