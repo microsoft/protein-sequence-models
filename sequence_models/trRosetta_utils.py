@@ -71,7 +71,7 @@ class trRosettaPreprocessing():
 
         processed_seqs = []
         for seq in seqs:
-            processed_seqs.append([self.ohe_dict[i] for i in seq])
+            processed_seqs.append([self.ohe_dict[i.item()] for i in seq])
         return torch.Tensor(np.array(processed_seqs)).long()
 
     def _reweight_py(self, msa1hot, cutoff, eps=1e-9):
