@@ -9,6 +9,7 @@ from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD, START, STOP, MASK
 from sequence_models.constants import ALL_AAS
 from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
+from sequence_models.trRosetta_utils import trRosettaPreprocessing
 
 
 class SimpleCollater(object):
@@ -300,6 +301,25 @@ class TAPE2trRosettaCollater(SimpleCollater):
             y = torch.stack(y, dim=0).long()
         return prepped.float(), y, tgt_mask, src_mask
     
+
+class MSAStructureCollater(StructureOutputCollater):
+
+    def __init__(self, pad_idx):
+        self.pad_idx = pad_idx
+
+    def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
+        msas, dists, omegas, thetas, phis = tuple(zip(*batch))
+        ells = [s.shape[1] for s in msas]
+        max_ell = max(ells)
+        msas = [F.pad(msa, [0, max_ell - ell], value=self.pad_idx).long() for msa, ell in zip(msas, ells)]
+        masks = [torch.ones_like(dist).bool() for dist in dists]
+        masks = self._pad(masks, ells, value=False)
+        dists = self._pad(dists, ells)
+        omegas = self._pad(omegas, ells)
+        thetas = self._pad(thetas, ells)
+        phis = self._pad(phis, ells)
+        return msas, dists, omegas, thetas, phis, masks
+
 
 class MSAGapCollater(object):
 
