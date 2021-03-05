@@ -419,20 +419,20 @@ def bins_to_vals(data=None, L=None):
             torch.Tensor(syn_theta), torch.Tensor(syn_phi)
     
 
-def get_node_features(omega, theta, phi):
+def get_node_features(omega, theta, phi, sc=False):
     """
     Extract node features
     
     Parameters:
     -----------
-    omega : torch.Tensor, (L, L)
-        omega angles
+    omega : torch.Tensor, (L, L) or (2, L, L)
+        omega angles or sines and cosines
 
-    theta : torch.Tensor, (L, L)
-        theta angles
+    theta : torch.Tensor, (L, L) or (2, L, L)
+        theta angles or sines and cosines
 
-    phi : torch.Tensor, (L, L)
-        phi angles
+    phi : torch.Tensor, (L, L) or (2, L, L)
+        phi angles or sines and cosines
 
     Returns:
     --------
@@ -443,22 +443,30 @@ def get_node_features(omega, theta, phi):
     if (omega.sum() == 0.0) and (theta.sum() == 0.0) and (phi.sum() == 0.0):
         return torch.zeros(omega.shape[0], 10)
 
-    # omega is symmetric, n1 is omega angle relative to prior
-    device = omega.device
-    n1 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(omega, offset=1)))
-    
-    # theta is asymmetric, n2 and n3 relative to prior
-    n2 = torch.cat((torch.diagonal(theta, offset=1), torch.tensor([0.], device=device)))
-    n3 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(theta, offset=-1)))
-    
-    # phi is asymmetric n4 and n5 relative to prior
-    n4 = torch.cat((torch.diagonal(phi, offset=1), torch.tensor([0.], device=device)))
-    n5 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(phi, offset=-1)))
-    
-    ns = torch.stack([n1, n2, n3, n4, n5], dim=1)
-    
-    # maybe add secondary structure
-    return torch.cat([torch.sin(ns), torch.cos(ns)], dim=1)
+    def get_features(omega, theta, phi):
+        # omega is symmetric, n1 is omega angle relative to prior
+        device = omega.device
+        n1 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(omega, offset=1)))
+
+        # theta is asymmetric, n2 and n3 relative to prior
+        n2 = torch.cat((torch.diagonal(theta, offset=1), torch.tensor([0.], device=device)))
+        n3 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(theta, offset=-1)))
+
+        # phi is asymmetric n4 and n5 relative to prior
+        n4 = torch.cat((torch.diagonal(phi, offset=1), torch.tensor([0.], device=device)))
+        n5 = torch.cat((torch.tensor([0.], device=device), torch.diagonal(phi, offset=-1)))
+
+        ns = torch.stack([n1, n2, n3, n4, n5], dim=1)
+        return ns
+
+    if not sc:
+        ns = get_features(omega, theta, phi)
+        s = torch.sin(ns)
+        c = torch.cos(ns)
+    else:
+        s = get_features(omega[0], theta[0], phi[0])
+        c = get_features(omega[1], theta[1], phi[1])
+    return torch.cat([s, c], dim=1)
     
 
 def get_k_neighbors(dist, k):
@@ -467,7 +475,7 @@ def get_k_neighbors(dist, k):
     return idx
 
 
-def get_edge_features(dist, omega, theta, phi, E_idx):
+def get_edge_features(dist, omega, theta, phi, E_idx, sc=False):
     """
     Get edge features based on k neighbors
     
@@ -490,7 +498,7 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
 
     Returns:
     --------
-    * : torch.Tensor, (L, k_neighbors, 6)
+    * : torch.Tensor, (L, k_neighbors, 11)
         Edge features 
 
     """
@@ -498,30 +506,41 @@ def get_edge_features(dist, omega, theta, phi, E_idx):
     if (omega.sum() == 0.0) and (theta.sum() == 0.0) and (phi.sum() == 0.0):
         return torch.zeros(omega.shape[0], E_idx.shape[1], 6) * np.nan
 
+    def get_features(omega, theta, phi, E_idx):
+        omega_E = []
+        theta_E = []
+        theta_Er = []
+        phi_E = []
+        phi_Er = []
+
+        for i in range(len(E_idx)):
+            omega_E.append(omega[i, E_idx[i]])
+            theta_E.append(theta[i, E_idx[i]])
+            theta_Er.append(theta[E_idx[i], i])
+            phi_E.append(phi[i, E_idx[i]])
+            phi_Er.append(phi[E_idx[i], i])
+        omega_E = torch.stack(omega_E)
+        theta_E = torch.stack(theta_E)
+        theta_Er = torch.stack(theta_Er)
+        phi_E = torch.stack(phi_E)
+        phi_Er = torch.stack(phi_Er)
+
+        angles = [omega_E, theta_E, theta_Er, phi_E, phi_Er]
+        return angles
+
     dist_E = []
-    omega_E = []
-    theta_E = []
-    theta_Er = []
-    phi_E = []
-    phi_Er = []
-    
     for i in range(len(E_idx)):
         dist_E.append(dist[i, E_idx[i]])
-        omega_E.append(omega[i, E_idx[i]])
-        theta_E.append(theta[i, E_idx[i]])
-        theta_Er.append(theta[E_idx[i], i])
-        phi_E.append(phi[i, E_idx[i]])
-        phi_Er.append(phi[E_idx[i], i])
-        
     dist_E = torch.stack(dist_E)
-    omega_E = torch.stack(omega_E)
-    theta_E = torch.stack(theta_E)
-    theta_Er = torch.stack(theta_Er)
-    phi_E = torch.stack(phi_E)
-    phi_Er = torch.stack(phi_Er)
-    
-    E = [dist_E, omega_E, theta_E, theta_Er, phi_E, phi_Er]
-    return torch.stack(E, dim=2)
+
+    if not sc:
+        angles = get_features(omega, theta, phi, E_idx)
+        s = [torch.sin(a) for a in angles]
+        c = [torch.cos(a) for a in angles]
+    else:
+        s = get_features(omega[0], theta[0], phi[0], E_idx)
+        c = get_features(omega[1], theta[1], phi[1], E_idx)
+    return torch.stack([dist_E] + s + c, dim=2)
 
 
 def get_mask(E):
