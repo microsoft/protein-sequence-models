@@ -187,10 +187,13 @@ class StructureImageCollater(object):
 
 class StructureCollater(object):
 
-    def __init__(self, sequence_collater: SimpleCollater, n_connections=20, backwards=False):
+    def __init__(self, sequence_collater: SimpleCollater, n_connections=20, backwards=False,
+                 n_node_features=10, n_edge_features=11):
         self.sequence_collater = sequence_collater
         self.n_connections = n_connections
         self.backwards = backwards
+        self.n_node_features = n_node_features
+        self.n_edge_features = n_edge_features
 
     def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
         sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
@@ -198,8 +201,8 @@ class StructureCollater(object):
         ells = [len(s) for s in sequences]
         max_ell = max(ells)
         n = len(sequences)
-        nodes = torch.zeros(n, max_ell, 10)
-        edges = torch.zeros(n, max_ell, self.n_connections, 6)
+        nodes = torch.zeros(n, max_ell, self.n_node_features)
+        edges = torch.zeros(n, max_ell, self.n_connections, self.n_edge_features)
         connections = torch.zeros(n, max_ell, self.n_connections, dtype=torch.long)
         edge_mask = torch.zeros(n, max_ell, self.n_connections, 1)
         for i, (ell, dist, omega, theta, phi) in enumerate(zip(ells, dists, omegas, thetas, phis)):
