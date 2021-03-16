@@ -251,6 +251,9 @@ class StructureOutputCollater(object):
             masks = [~torch.isnan(dist) for dist in dists]
         else:
             masks = [torch.ones_like(dist).bool() for dist in dists]
+        masks = [~torch.isnan(omega) & m for omega, m in zip(omegas, masks)]
+        masks = [~torch.isnan(theta) & m for theta, m in zip(thetas, masks)]
+        masks = [~torch.isnan(phi) & m for phi, m in zip(phis, masks)]
         masks = self._pad(masks, ells, value=False)
         dists = self._pad(dists, ells)
         omegas = self._pad(omegas, ells)
