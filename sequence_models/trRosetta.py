@@ -171,6 +171,29 @@ class trRosetta(nn.Module):
         self.load_state_dict(torch.load(path, ), strict=False)
 
 
+class trRosettaRegressor(trRosetta):
+
+    def __init__(self, model_id='a', p_dropout=0.0):
+        super(trRosettaRegressor, self).__init__(n2d_layers=61, model_id=model_id, decoder=False, p_dropout=p_dropout)
+        self.dist_layer = nn.Conv2d(64, 1, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
+        self.theta_layer = nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
+        self.phi_layer =  nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
+        self.omega_layer = nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
+        self.relu = nn.ReLU()
+        self.tanh = nn.Tanh()
+
+    def forward(self, x, input_mask=None, softmax=False):
+        h = super(trRosettaRegressor, self).forward(x, input_mask=input_mask)
+        sc_theta = self.tanh(self.theta_layer(h))
+        sc_phi = self.tanh(self.phi_layer(h))
+
+        # symmetrize
+        h = 0.5 * (h + torch.transpose(h, 2, 3))
+        dist = self.relu(self.dist_layer(h))
+        sc_omega = self.tanh(self.omega_layer(h))
+        return dist, sc_theta, sc_phi, sc_omega
+
+
 class trRosettaEnsemble(nn.Module):
     """trRosetta ensemble"""
     def __init__(self, model, n2d_layers=61, model_ids='abcde', decoder=True):
@@ -197,14 +220,14 @@ class trRosettaEnsemble(nn.Module):
             params = {'model_id': i, 'n2d_layers': n2d_layers, 'decoder': decoder}
             self.model_list.append(model(**params))
 
-    def forward(self, x):
+    def forward(self, x, input_mask=None, softmax=True):
         """
         Parameters:
         -----------
         x : torch.Tensor, (1, 526, len(sequence), len(sequence))
             inputs after trRosettaPreprocessing
         """
-        return [mod(x) for mod in self.model_list]
+        return [mod(x, input_mask=input_mask, softmax=softmax) for mod in self.model_list]
 
 
 class trRosettaDist(nn.Module):
