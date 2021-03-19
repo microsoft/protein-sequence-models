@@ -221,7 +221,8 @@ class trRosettaPreprocessing():
                         dtype=weights.dtype)[None]
         reg = reg * penalty / weights.sum(1, keepdims=True).sqrt().unsqueeze(2)
         cov_reg = cov + reg
-        inv_cov = torch.inverse(cov_reg)
+        chol = torch.cholesky(cov_reg.squeeze())
+        inv_cov = torch.cholesky_inverse(chol).unsqueeze(0)
         x1 = inv_cov.view(batch_size, self.seqlen, num_symbols, self.seqlen, num_symbols)
         x2 = x1.permute(0, 1, 3, 2, 4)
         features = x2.reshape(batch_size, self.seqlen, self.seqlen, num_symbols * num_symbols)
