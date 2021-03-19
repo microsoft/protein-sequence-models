@@ -31,7 +31,7 @@ class trRosettaBlock(nn.Module):
         self.dropout1 = nn.Dropout2d(p_dropout)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, dilation=dilation, padding=pad_size(dilation, 3, 1))
 
-    def forward(self, x, input_mask=None):
+    def forward(self, x, input_mask=None, last_elu=True):
         """
         Parameters:
         -----------
@@ -55,7 +55,9 @@ class trRosettaBlock(nn.Module):
         h = self.dropout1(h)
         if input_mask is not None:
             h = h * input_mask
-        h = F.elu(self.instnorm2(self.conv2(h), input_mask=input_mask) + x)
+        h = self.instnorm2(self.conv2(h), input_mask=input_mask) + x
+        if last_elu:
+            h = F.elu(h)
         return h
 
 
@@ -128,8 +130,14 @@ class trRosetta(nn.Module):
             x = x * input_mask
         h = self.conv0(x)
         h = F.elu(self.instnorm0(h, input_mask=input_mask))
-        for layer in self.layers:
-            h = layer(h, input_mask=input_mask)
+        for i, layer in enumerate(self.layers):
+            if not self.decoder:
+                last_elu = True
+            elif i != len(self.layers) - 1:
+                last_elu = True
+            else:
+                last_elu = False
+            h = layer(h, input_mask=input_mask, last_elu=last_elu)
             if input_mask is not None:
                 h = h * input_mask
         if self.decoder:
@@ -184,6 +192,7 @@ class trRosettaRegressor(trRosetta):
 
     def forward(self, x, input_mask=None, softmax=False):
         h = super(trRosettaRegressor, self).forward(x, input_mask=input_mask)
+        h = F.elu(h)
         sc_theta = self.tanh(self.theta_layer(h))
         sc_phi = self.tanh(self.phi_layer(h))
 
