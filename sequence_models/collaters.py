@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD, START, STOP, MASK
+from sequence_models.constants import PAD, START, STOP, MASK, PROTEIN_ALPHABET, trR_ALPHABET
 from sequence_models.constants import ALL_AAS
 from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
 from sequence_models.trRosetta_utils import trRosettaPreprocessing
@@ -325,6 +325,48 @@ class MSAStructureCollater(StructureOutputCollater):
         thetas = self._pad(thetas, ells)
         phis = self._pad(phis, ells)
         return msas, dists, omegas, thetas, phis, masks
+
+
+class MSASequenceCollater(MSAStructureCollater):
+
+    def __init__(self, pad_idx, max_len=300, device=torch.device('cpu')):
+        self.pad_idx = pad_idx
+        self.prep = trRosettaPreprocessing(trR_ALPHABET)
+        self.ohe_dict = {i: PROTEIN_ALPHABET.index(t) for i, t in enumerate(trR_ALPHABET)}
+        self.max_len = max_len
+        self.device = device
+
+    def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
+        msas, dists, omegas, thetas, phis = tuple(zip(*batch))
+        subsampled = []
+        ells = [s.shape[1] for s in msas]
+        x_seq = [torch.tensor([self.ohe_dict[t.item()] for t in s[0]]) for s in msas]
+        x_seq = _pad(x_seq, PROTEIN_ALPHABET.index(PAD))
+
+        idx = []
+        for ell in ells:
+            if ell - self.max_len > 0:
+                start = np.random.choice(ell - self.max_len)
+                stop = start + self.max_len
+            else:
+                start = 0
+                stop = ell
+            idx.append((start, stop))
+        for msa, ix in zip(msas, idx):
+            start, stop = ix
+            keep = torch.multinomial(torch.ones(len(msa) - 1), min(1000, len(msa) // 2))
+            keep = torch.cat([torch.zeros(1).long(), keep + 1])
+            msa = msa[keep, start: stop]
+            subsampled.append(msa)
+
+        masks = [torch.ones_like(dist).bool() for dist in dists]
+        masks = self._pad(masks, ells, value=False)
+        ells = [msa.shape[1] for msa in subsampled]
+        max_ell = max(ells)
+        subsampled = [F.pad(msa, [0, max_ell - ell], value=self.pad_idx).long() for msa, ell in zip(subsampled, ells)]
+        with torch.no_grad():
+            x_msa = torch.cat([torch.cat([self.prep.process(s.to(self.device)) for s in subsampled])])
+        return x_seq, x_msa, masks, idx
 
 
 class MSAGapCollater(object):
