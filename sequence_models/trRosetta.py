@@ -188,7 +188,7 @@ class trRosettaRegressor(trRosetta):
         self.phi_layer =  nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
         self.omega_layer = nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
         self.relu = nn.ReLU()
-        self.tanh = nn.Tanh()
+        self.tanh = nn.Hardtanh()
 
     def forward(self, x, input_mask=None, softmax=False):
         h = super(trRosettaRegressor, self).forward(x, input_mask=input_mask)
