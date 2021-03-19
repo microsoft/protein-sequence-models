@@ -6,7 +6,53 @@ import wget
 import tarfile
 import string
 
-from sequence_models.constants import WEIGHTS_DIR, trR_ALPHABET
+from sequence_models.constants import WEIGHTS_DIR, trR_ALPHABET, DIST_BINS, PHI_BINS, OMEGA_BINS, THETA_BINS
+
+
+def probs2value(array, property, mask2d):
+    # input shape: batch, n_bins, ell, ell
+    # output shape: batch, ell, ell
+    if property == 'dist':
+        bins = DIST_BINS
+    elif property == 'phi':
+        bins = PHI_BINS
+    elif property == 'omega':
+        bins = OMEGA_BINS
+    elif property == 'theta':
+        bins = THETA_BINS
+    if property == 'dist':
+        bins = torch.tensor(np.nan_to_num(bins), device=array.device, dtype=array.dtype)
+        b = (bins[:-1] + bins[1:]) / 2
+        diff = b[-1] - b[-2]
+        b[0] = b[-1] + diff
+    else:
+        b = torch.tensor((bins[1:-1] + bins[2:]) / 2, device=array.device, dtype=array.dtype)
+    b = b.view(1, -1, 1, 1)
+    if property != 'dist':
+        probs = array[:, 1:, :, :]
+        den = torch.sum(probs, dim=1, keepdim=True)
+        j = torch.where(den < 1e-9)
+        den[j] = 1e-9
+        probs = probs / den
+    else:
+        probs = array
+    if property in ['dist', 'phi']:
+        values = b * probs
+        values = values.sum(dim=1)
+    else:
+        s = (torch.sin(b) * probs).sum(dim=1)
+        c = (torch.cos(b) * probs).sum(dim=1)
+        j = torch.where(s.abs() < 1e-9)
+        s[j] = 1e-9
+        j = torch.where(c.abs() < 1e-9)
+        c[j] = 1e-9
+        values = torch.atan2(s, c)
+
+    values = values.masked_fill(~mask2d.bool().squeeze(), np.nan)
+    ii, jj = np.diag_indices(values.shape[1])
+    for i in range(len(values)):
+        values[i, ii, jj] = values[i, ii, jj] + np.nan
+    return values
 
 
 # probably move this into a collate_fn 
