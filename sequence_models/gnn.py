@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from sequence_models.constants import DIST_BINS, THETA_BINS, PHI_BINS, OMEGA_BINS
+from sequence_models.structure import Attention1d
 
 ######################## UTILS FROM ORIGINAL PAPER ########################
 
@@ -776,3 +777,23 @@ class Struct2SeqDecoder(nn.Module):
         
         logits = self.W_out(h_V) 
         return logits
+
+
+class Struct2Property(Struct2SeqDecoder):
+
+    def __init__(self, d_out, node_features, edge_features,
+                 hidden_dim, num_decoder_layers=3, dropout=0.1, use_mpnn=False,
+                 direction='bidirectional'):
+        Struct2SeqDecoder.__init__(self, hidden_dim, node_features, edge_features,
+                                   hidden_dim, num_decoder_layers=num_decoder_layers, dropout=dropout,
+                                   use_mpnn=use_mpnn,
+                                   direction=direction)
+        self.attention = Attention1d(hidden_dim)
+        self.relu = nn.ReLU()
+        self.output = nn.Linear(hidden_dim, d_out)
+
+    def forward(self, nodes, edges, connections, src, edge_mask, input_mask=None):
+        h = Struct2SeqDecoder.forward(self, nodes, edges, connections, src, edge_mask)
+        h = self.attention(h, input_mask=input_mask)
+        h = self.relu(h)
+        return self.output(h)
