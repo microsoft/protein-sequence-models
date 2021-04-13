@@ -211,7 +211,7 @@ class CSVDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        row = self.data.loc[idx]
+        row = self.data.iloc[idx]
         return [row['sequence'], *row[self.outputs]]
 
 
@@ -463,7 +463,7 @@ class MSAGapDataset(Dataset):
                 gap-prob or lm
             pdb: bool,
                 if True, return structure as inputs; if False, return random sequence
-                if pdb is False, you must have task = gab-prob
+                if pdb-cath is False, you must have task = gab-prob
             filtered_y: bool,
                 if True, use gap probabilities from filtered MSA (task = gap-prob)
                 or select sequence from filtered MSA (task = lm)
@@ -475,7 +475,7 @@ class MSAGapDataset(Dataset):
             npz_dir: str,
                 if you have a specified npz directory
             pdb_dir: str,
-                if you have a specified pdb directory
+                if you have a specified pdb-cath directory
         """
         filename = data_dir + dataset + 'list.txt'
         pdb_ids = np.loadtxt(filename, dtype=str)
@@ -497,7 +497,7 @@ class MSAGapDataset(Dataset):
         selected_npzs = [i for i in pdb_ids if i + '.npz' in all_npzs]
         self.filenames = selected_npzs  # ids of samples to include
 
-        # get pdb dir
+        # get pdb-cath dir
         self.pdb = pdb
         if pdb_dir:
             self.pdb_dir = pdb_dir
@@ -551,7 +551,7 @@ class MSAGapDataset(Dataset):
                 return x[seq_mask], y[seq_mask]
             else:
                 raise ValueError("""Warning - input type and output type are not compatible, 
-                    pdb=False can only be used with task gap-prob""")
+                    pdb-cath=False can only be used with task gap-prob""")
 
     def _get_lm_y(self, filename, filter_gap):
         if filter_gap:

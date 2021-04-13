@@ -354,7 +354,7 @@ class MSASequenceCollater(MSAStructureCollater):
             idx.append((start, stop))
         for msa, ix in zip(msas, idx):
             start, stop = ix
-            keep = torch.multinomial(torch.ones(len(msa) - 1), min(1000, len(msa) // 2))
+            keep = torch.multinomial(torch.ones(len(msa) - 1), min(500, len(msa) // 2))
             keep = torch.cat([torch.zeros(1).long(), keep + 1])
             msa = msa[keep, start: stop]
             subsampled.append(msa)
@@ -415,3 +415,17 @@ class MSAGapCollater(object):
             y = _pad(y, 0)
             mask_y = _pad(mask_y, False)
         return X + (mask_x, y, mask_y)
+
+
+class Seq2PropertyCollater(SimpleCollater):
+
+    def __init__(self, alphabet: str, pad=True):
+        super().__init__(alphabet, pad=pad)
+
+    def __call__(self, batch):
+        data = tuple(zip(*batch))
+        sequences = data[0]
+        prepped = self._prep(sequences)
+        y = data[1]
+        y = torch.tensor(y).unsqueeze(-1).float()
+        return prepped[0], y
