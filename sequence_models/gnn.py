@@ -797,3 +797,106 @@ class Struct2Property(Struct2SeqDecoder):
         h = self.attention(h, input_mask=input_mask)
         h = self.relu(h)
         return self.output(h)
+
+
+class StructEncoder(nn.Module):
+    """
+    Encoder layers from "Generative models for graph-based protein design"
+    Ingraham, J., et al : https://github.com/jingraham/neurips19-graph-protein-design/
+
+    Encoder architecture:
+        Input -> node features, edge features, k_neighbors, sequence if possible,
+            otherwise if no structure automatically generate zero_like
+            tensor to replace node and edge features
+        Embed features and sequence -> concat features according to k_neighbors
+        Pass through TransformerLayer or MPNNLayer layers
+        Pass through final output layer to predict residue
+    """
+
+    def __init__(self, d_out, node_features, edge_features,
+                 hidden_dim, num_layers=3, dropout=0.1, use_mpnn=False):
+
+        """
+        Parameters:
+        -----------
+        d_out : int
+
+        node_features : int
+            number of node features
+
+        edge_features : int
+            number of edge features
+
+        hidden_dim : int
+            hidden dim
+
+        num_encoder_layers : int
+            number of encoder layers
+
+        num_decoder_layers : int
+            number of decoder layers
+
+        dropout : float
+            dropout
+
+        foward_attention_decoder : bool
+            if True, use foward attention on encoder embeddings in decoder
+
+        use_mpnn : bool
+            if True, use MPNNLayer instead of TransformerLayer
+
+        """
+
+        super(StructEncoder, self).__init__()
+
+        # Hyperparameters
+        self.node_features = node_features
+        self.edge_features = edge_features
+        self.hidden_dim = hidden_dim
+
+        # Embedding layers
+        self.W_v = nn.Linear(node_features, hidden_dim, bias=True)
+        self.W_e = nn.Linear(edge_features, hidden_dim, bias=True)
+        layer = TransformerLayer if not use_mpnn else MPNNLayer
+
+        # Decoder layers
+        self.layers = nn.ModuleList([
+            layer(hidden_dim, hidden_dim, dropout=dropout)
+            for _ in range(num_layers)
+        ])
+        self.W_out = nn.Linear(hidden_dim, d_out, bias=True)
+
+        # Initialization
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+
+    def forward(self, nodes, edges, connections, edge_mask):
+        """
+        Parameters:
+        -----------
+        nodes : torch.Tensor, (N_batch, L, in_channels)
+            Node features
+
+        edges : torch.Tensor, (N_batch, L, K_neighbors, in_channels)
+            Edge features
+
+        connections : torch.Tensor, (N_batch, L, K_neighbors)
+            Node neighbors
+
+        edge_mask : torch.Tensor, (N_batch, L, k_neighbors)
+            Mask to hide nodes with missing features
+
+        Returns:
+        --------
+        output : torch.Tensor, (N_batch, L, d_out)
+        """
+
+        # Prepare node, edge, sequence embeddings
+        h_V = self.W_v(nodes)  # (N, L, h_dim)
+        h_E = self.W_e(edges) * edge_mask  # (N, L, k, h_dim)
+        for layer in self.layers:
+            h_V = layer(h_V, h_E, mask_V=None)
+        return self.W_out(h_V)
+
