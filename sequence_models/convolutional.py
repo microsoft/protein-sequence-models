@@ -361,16 +361,31 @@ class ByteNetLM(nn.Module):
         return self.decoder(e)
 
 
+class ConditionedByteNetLM(nn.Module):
+
+    def __init__(self, n_tokens, d_embedding, d_conditioning, d_model, n_layers, kernel_size, r,
+                 padding_idx=None, causal=False):
+        super().__init__()
+        self.embedder = ConditionedByteNetDecoder(n_tokens, d_embedding, d_conditioning,
+                                                  d_model, n_layers, kernel_size, r,
+                                                  padding_idx=padding_idx, causal=causal)
+        self.decoder = PositionFeedForward(d_model, n_tokens)
+
+    def forward(self, x, input_mask=None):
+        e = self.embedder(x, input_mask=input_mask)
+        return self.decoder(e)
+
+
 class ConditionedByteNetDecoder(ByteNet):
     """ A conditioned, ByteNet decoder.
     Inputs:
         x (n, ell)
         c: (n, d_conditioning)
-        ells: lengths of blocks
 
     """
 
-    def __init__(self, n_tokens, d_embedding, d_conditioning, d_model, n_layers, kernel_size, r):
+    def __init__(self, n_tokens, d_embedding, d_conditioning, d_model, n_layers, kernel_size, r,
+                 padding_idx=None, causal=False):
         """
         :param n_tokens: number of tokens in token dictionary
         :param d_embedding: dimension of embedding
@@ -381,7 +396,7 @@ class ConditionedByteNetDecoder(ByteNet):
         :param r: used to calculate dilation factor
         """
         super().__init__(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                         ells=None, padding_idx=None, causal=True)
+                         padding_idx=padding_idx, causal=causal)
         self.up_embedder = PositionFeedForward(d_embedding, d_model - d_conditioning)
 
     def _embed(self, inputs):
@@ -390,8 +405,11 @@ class ConditionedByteNetDecoder(ByteNet):
         e = self.up_embedder(e)  # (n, ell, d_model - d_conditioning)
         # Concatenate the conditioning
         _, ell = x.shape
-        c = c.unsqueeze(1)
-        c_ = torch.repeat_interleave(c, ell, dim=1)  # (n, ell, d_conditioning)
+        if len(c.shape) == 2:
+            c = c.unsqueeze(1)
+            c_ = torch.repeat_interleave(c, ell, dim=1)  # (n, ell, d_conditioning)
+        else:
+            c_ = c
         e = torch.cat([e, c_], dim=2)  # (n, ell, d_model)
         return e
 
