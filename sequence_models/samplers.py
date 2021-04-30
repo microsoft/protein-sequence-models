@@ -87,3 +87,5 @@ class ApproxBatchSampler(BatchSampler):
                 batch = [idx]
                 length = this_length
                 ell_sq = this_length ** 2
+        if len(batch) > 0:
+            yield batch
