@@ -327,51 +327,9 @@ class MSAStructureCollater(StructureOutputCollater):
         return msas, dists, omegas, thetas, phis, masks
 
 
-class MSASequenceCollater(MSAStructureCollater):
-
-    def __init__(self, pad_idx, max_len=300, device=torch.device('cpu')):
-        self.pad_idx = pad_idx
-        self.prep = trRosettaPreprocessing(trR_ALPHABET)
-        self.ohe_dict = {i: PROTEIN_ALPHABET.index(t) for i, t in enumerate(trR_ALPHABET)}
-        self.max_len = max_len
-        self.device = device
-
-    def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
-        msas, dists, omegas, thetas, phis = tuple(zip(*batch))
-        subsampled = []
-        ells = [s.shape[1] for s in msas]
-        x_seq = [torch.tensor([self.ohe_dict[t.item()] for t in s[0]]) for s in msas]
-        x_seq = _pad(x_seq, PROTEIN_ALPHABET.index(PAD))
-
-        idx = []
-        for ell in ells:
-            if ell - self.max_len > 0:
-                start = np.random.choice(ell - self.max_len)
-                stop = start + self.max_len
-            else:
-                start = 0
-                stop = ell
-            idx.append((start, stop))
-        for msa, ix in zip(msas, idx):
-            start, stop = ix
-            keep = torch.multinomial(torch.ones(len(msa) - 1), min(500, len(msa) // 2))
-            keep = torch.cat([torch.zeros(1).long(), keep + 1])
-            msa = msa[keep, start: stop]
-            subsampled.append(msa)
-
-        masks = [torch.ones_like(dist).bool() for dist in dists]
-        masks = self._pad(masks, ells, value=False)
-        ells = [msa.shape[1] for msa in subsampled]
-        max_ell = max(ells)
-        subsampled = [F.pad(msa, [0, max_ell - ell], value=self.pad_idx).long() for msa, ell in zip(subsampled, ells)]
-        with torch.no_grad():
-            x_msa = torch.cat([torch.cat([self.prep.process(s.to(self.device)) for s in subsampled])])
-        return x_seq, x_msa, masks, idx
-
-
 class MSAGapCollater(object):
 
-    def __init__(self, alphabet, input_type, output_type, n_connections=20):
+    def __init__(self, alphabet, input_type, output_type, random_seq, n_connections=20):
         """
         Args:
             alphabet: str,
@@ -386,22 +344,34 @@ class MSAGapCollater(object):
         # collaters
         self.simple_collater = SimpleCollater(alphabet=alphabet, pad=True)
         self.structure_collater = StructureCollater(self.simple_collater, n_connections=n_connections)
-
+        self.mlm_collater = MLMCollater(alphabet=alphabet+MASK, pad=True)
+        
         # data type
         self.input_type = input_type
         self.output_type = output_type
 
         # grab tokenizer just in case
+        self.alphabet = alphabet
         self.tokenizer = Tokenizer(alphabet)
+        
+        self.random_seq = random_seq
 
     def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
         if self.input_type == 'structure':
-            seq, dist, omega, theta, phi, y, y_mask = tuple(zip(*batch))
+            if self.random_seq: 
+                seq, anchor_seq, dist, omega, theta, phi, y, y_mask = tuple(zip(*batch))
+                # batch anchor seq
+                anchor_seq = _pad(anchor_seq, self.alphabet.index(PAD))
+            else:
+                seq, anchor_seq, dist, omega, theta, phi, y, y_mask = tuple(zip(*batch))
+#                 anchor_seq = None
+                anchor_seq = _pad(anchor_seq, self.alphabet.index(PAD))
             seq = [self.tokenizer.untokenize(i.numpy()) for i in seq]
             rebatch = [(seq[i], dist[i], omega[i], theta[i], phi[i]) for i in range(len(seq))]
             seqs, nodes, edges, connections, edge_mask = self.structure_collater.__call__(rebatch)
+            
             mask_x = None
-            X = (seqs, nodes, edges, connections, edge_mask)
+            X = (seqs, anchor_seq, nodes, edges, connections, edge_mask) 
 
         elif self.input_type == 'sequence':  # by design, y is gap prob
             seq, y = tuple(zip(*batch))
@@ -414,6 +384,31 @@ class MSAGapCollater(object):
             mask_y = [torch.ones_like(i).bool() for i in y]
             y = _pad(y, 0)
             mask_y = _pad(mask_y, False)
+            # adjust y format to fit kldivloss
+            y = y.unsqueeze(-1)
+            y = torch.cat((y, torch.ones_like(y)-y), -1)
+        
+        if (self.output_type == 'lm'):
+            if y_mask[0] is not None:
+                mask_y = _pad(y_mask, False)
+            else:
+                mask_y = [torch.ones_like(i).bool() for i in y]
+                mask_y = _pad(mask_y, False)
+            y = _pad(y, 20)
+            
+        if self.output_type == 'mlm':
+            y = _pad(y, 0)
+            # repackage input seqs
+            seqs = X[0]
+            seqs = [self.tokenizer.untokenize(i.numpy()) for i in seqs]
+            rebatch = [tuple([i]) for i in seqs]
+            seqs, _, mask_y  = self.mlm_collater.__call__(rebatch)
+            mask_y = mask_y.bool()
+            if self.input_type == 'structure':
+                X = (seqs, anchor_seq, nodes, edges, connections, edge_mask)
+            elif self.input_type == 'sequence':
+                X = (seqs)
+                
         return X + (mask_x, y, mask_y)
 
 
