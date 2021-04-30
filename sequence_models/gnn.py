@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from sequence_models.constants import DIST_BINS, THETA_BINS, PHI_BINS, OMEGA_BINS
 from sequence_models.structure import Attention1d
+from sequence_models.layers import PositionalEncoding
 
 ######################## UTILS FROM ORIGINAL PAPER ########################
 
@@ -613,7 +614,7 @@ class Struct2SeqDecoder(nn.Module):
     """
     def __init__(self, num_letters, node_features, edge_features,
                  hidden_dim, num_decoder_layers=3, dropout=0.1, use_mpnn=False,
-                 direction='bidirectional'):
+                 direction='bidirectional', pe=False):
         
         """
         Parameters:
@@ -659,6 +660,10 @@ class Struct2SeqDecoder(nn.Module):
         self.W_v = nn.Linear(node_features, hidden_dim, bias=True)
         self.W_e = nn.Linear(edge_features, hidden_dim, bias=True)
         self.W_s = nn.Embedding(num_letters, hidden_dim)
+        if pe:
+            self.pe = PositionalEncoding(hidden_dim)
+        else:
+            self.pe = nn.Identity()
         layer = TransformerLayer if not use_mpnn else MPNNLayer
 
         # Decoder layers
@@ -722,6 +727,7 @@ class Struct2SeqDecoder(nn.Module):
             
         # Prepare node, edge, sequence embeddings
         h_V = self.W_v(nodes) # (N, L, h_dim)
+        h_V = self.pe(h_V)
         h_E = self.W_e(edges) # (N, L, k, h_dim)
         h_S = self.W_s(src) # (N, L, h_dim)
         # if src_mask is not None:
@@ -861,7 +867,7 @@ class StructEncoder(nn.Module):
 
         # Decoder layers
         self.layers = nn.ModuleList([
-            layer(hidden_dim, hidden_dim, dropout=dropout)
+            layer(hidden_dim, 2 * hidden_dim, dropout=dropout)
             for _ in range(num_layers)
         ])
         self.W_out = nn.Linear(hidden_dim, d_out, bias=True)
@@ -896,7 +902,9 @@ class StructEncoder(nn.Module):
         # Prepare node, edge, sequence embeddings
         h_V = self.W_v(nodes)  # (N, L, h_dim)
         h_E = self.W_e(edges) * edge_mask  # (N, L, k, h_dim)
+
         for layer in self.layers:
-            h_V = layer(h_V, h_E, mask_V=None)
+            h_EV = cat_neighbors_nodes(h_V, h_E, connections)
+            h_V = layer(h_V, h_EV, mask_V=None)
         return self.W_out(h_V)
 
