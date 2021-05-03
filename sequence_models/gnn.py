@@ -682,9 +682,11 @@ class Struct2SeqDecoder(nn.Module):
         N_nodes = connections.size(1)
         ii = torch.arange(N_nodes, device=connections.device)
         ii = ii.view((1, -1, 1))
-        mask = connections - ii < 0
-        mask = mask.type(torch.float32)
-        return mask
+        fmask = connections - ii < 0
+        fmask = fmask.type(torch.float32).unsqueeze(-1)
+        bmask = connections - ii < 0
+        bmask = bmask.type(torch.float32).unsqueeze(-1)
+        return fmask, bmask
 
     # def _node_edge_mask(self, src, connections):
     #     V_mask = torch.zeros(src.shape[0], src.shape[1], self.hidden_dim, device=src.device)
@@ -735,9 +737,8 @@ class Struct2SeqDecoder(nn.Module):
         
         
         # Prepare masks
-        mask_fw = self._autoregressive_mask(connections).unsqueeze(-1)
-        mask_bw = 1. - mask_fw
-        
+        mask_fw, mask_bw = self._autoregressive_mask(connections)
+
         
         # Masking if no structure is available
         if self.no_structure:
