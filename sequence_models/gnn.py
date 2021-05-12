@@ -662,7 +662,7 @@ class Struct2SeqDecoder(nn.Module):
         if one_hot_src:
             self.W_s = nn.Embedding(num_letters, hidden_dim)
         else:
-            self.W_s = nn.Identity()
+            self.W_s = nn.Linear(num_letters, hidden_dim, bias=True)
         if pe:
             self.pe = PositionalEncoding(hidden_dim)
         else:
@@ -773,10 +773,12 @@ class Struct2SeqDecoder(nn.Module):
             h_S_encoder = mask_fw * h_S_encoder
 
        # Run decoder
-        for layer in self.decoder_layers:
+        for i, layer in enumerate(self.decoder_layers):
             # h_ESV is concatenated node, edge and seq info
             h_ESV = cat_neighbors_nodes(h_V, h_ES, connections) # (N, L, k, h_dim*3)
-            if self.direction != 'bidirectional':
+            if self.direction == 'bidirectional' and i == 0:
+                h_ESV += h_S_encoder
+            elif self.direction != 'bidirectional':
                 # apply mask to hide everything in the futre
                 h_ESV = mask_fw * h_ESV
                 # read the structure info in the future
