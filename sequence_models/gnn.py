@@ -660,9 +660,9 @@ class Struct2SeqDecoder(nn.Module):
         self.W_v = nn.Linear(node_features, hidden_dim, bias=True)
         self.W_e = nn.Linear(edge_features, hidden_dim, bias=True)
         if one_hot_src:
-            self.W_s = nn.Identity()
+            self.W_s = nn.Embedding(num_letters, hidden_dim)
         else:
-            self.W_s = nn.Linear(num_letters, hidden_dim, bias=True)
+            self.W_s = nn.Identity()
         if pe:
             self.pe = PositionalEncoding(hidden_dim)
         else:
