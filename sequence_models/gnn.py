@@ -614,7 +614,7 @@ class Struct2SeqDecoder(nn.Module):
     """
     def __init__(self, num_letters, node_features, edge_features,
                  hidden_dim, num_decoder_layers=3, dropout=0.1, use_mpnn=False,
-                 direction='bidirectional', pe=False, one_hot_src=True):
+                 direction='forward', pe=False, one_hot_src=True):
         
         """
         Parameters:
@@ -691,10 +691,6 @@ class Struct2SeqDecoder(nn.Module):
         bmask = bmask.type(torch.float32).unsqueeze(-1)
         return fmask, bmask
 
-    # def _node_edge_mask(self, src, connections):
-    #     V_mask = torch.zeros(src.shape[0], src.shape[1], self.hidden_dim, device=src.device)
-    #     E_mask = torch.zeros(src.shape[0], src.shape[1], connections.shape[2], self.hidden_dim, device=src.device)
-    #     return V_mask, E_mask
 
     def forward(self, nodes, edges, connections, src, edge_mask,):
         """
@@ -735,10 +731,7 @@ class Struct2SeqDecoder(nn.Module):
         h_V = self.pe(h_V)
         h_E = self.W_e(edges) # (N, L, k, h_dim)
         h_S = self.W_s(src) # (N, L, h_dim)
-        # if src_mask is not None:
-        #     h_S = src_mask * h_S
-        
-        
+
         # Prepare masks
         mask_fw, mask_bw = self._autoregressive_mask(connections)
 
@@ -750,23 +743,16 @@ class Struct2SeqDecoder(nn.Module):
         
         
         # Prepare h_ES, only contain edge info, we will handle sequence info separately based on direction
-        h_ES = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections) 
+        h_ES = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)
         h_ES = edge_mask * h_ES
-    
-    
         # Prepare future structure information
         h_E_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)  # (N, L, k, h_dim*2)
         h_E_encoder = edge_mask * h_E_encoder # mask edge features with missing data
         h_EV_encoder = cat_neighbors_nodes(h_V, h_E_encoder, connections) # (N, L, k, h_dim*2)
         h_EV_encoder = mask_bw * h_EV_encoder # mask past structure info
-
-        
         # Prepare sequence information based on direction
         h_S_encoder = cat_neighbors_nodes(h_S, torch.zeros_like(h_E), connections) # (N, L, k, h_dim*2)
         h_S_encoder = cat_neighbors_nodes(torch.zeros_like(h_V), h_S_encoder, connections) # (N, L, k, h_dim*3)
-        
-        if self.direction == 'bidirectional': # use future and past
-            h_S_encoder = h_S_encoder
         if self.direction == 'backward': # use future to predict past
             h_S_encoder = mask_bw * h_S_encoder
         if self.direction == 'forward': # use past to predict future
@@ -776,19 +762,166 @@ class Struct2SeqDecoder(nn.Module):
         for i, layer in enumerate(self.decoder_layers):
             # h_ESV is concatenated node, edge and seq info
             h_ESV = cat_neighbors_nodes(h_V, h_ES, connections) # (N, L, k, h_dim*3)
-            if self.direction == 'bidirectional' and i == 0:
-                h_ESV += h_S_encoder
-            elif self.direction != 'bidirectional':
-                # apply mask to hide everything in the futre
-                h_ESV = mask_fw * h_ESV
-                # read the structure info in the future
-                h_ESV += h_EV_encoder
-                # add sequence information according to direction
-                h_ESV += h_S_encoder
+            # apply mask to hide everything in the futre
+            h_ESV = mask_fw * h_ESV
+            # read the structure info in the future
+            h_ESV += h_EV_encoder
+            # add sequence information according to direction
+            h_ESV += h_S_encoder
             # pass to decoder layer
             h_V = layer(h_V, h_ESV, mask_V=None)
-        
         logits = self.W_out(h_V) 
+        return logits
+
+
+class BidirectionalStruct2SeqDecoder(nn.Module):
+    """
+    Decoder layers from "Generative models for graph-based protein design"
+    Ingraham, J., et al : https://github.com/jingraham/neurips19-graph-protein-design/
+
+    Decoder architecture:
+        Input -> node features, edge features, k_neighbors, sequence if possible,
+            otherwise if no structure automatically generate zero_like
+            tensor to replace node and edge features
+        Embed features and sequence -> concat features according to k_neighbors
+        Pass through TransformerLayer or MPNNLayer layers
+        Pass through final output layer to predict residue
+
+    Example:
+        # preprocessing
+        # load in features dist, omega, theta, and phi
+        nodes = get_node_features(omega, theta, phi)
+        connections = get_k_neighbors(dist, 10)
+        edges = get_edge_features(dist, omega, theta, phi, connections)
+        mask = get_mask(edges)
+        edges = replace_nan(edges)
+        L = len(seq)
+        src = get_S_enc(seq, tokenizer)
+
+        model = Struct2SeqDecoder(num_letters=20, node_features=10,
+                    edge_features=6, hidden_dim=16)
+
+        outputs = model(nodes, edges, connections, src, mask)
+
+    """
+
+    def __init__(self, num_letters, node_features, edge_features,
+                 hidden_dim, num_decoder_layers=3, dropout=0.1, use_mpnn=False
+                 , pe=False, one_hot_src=True):
+
+        """
+        Parameters:
+        -----------
+        num_letters : int
+            len of protein alphabet
+
+        node_features : int
+            number of node features
+
+        edge_features : int
+            number of edge features
+
+        hidden_dim : int
+            hidden dim
+
+        num_encoder_layers : int
+            number of encoder layers
+
+        num_decoder_layers : int
+            number of decoder layers
+
+        dropout : float
+            dropout
+
+        foward_attention_decoder : bool
+            if True, use foward attention on encoder embeddings in decoder
+
+        use_mpnn : bool
+            if True, use MPNNLayer instead of TransformerLayer
+
+        """
+
+        super(BidirectionalStruct2SeqDecoder, self).__init__()
+
+        # Hyperparameters
+        self.node_features = node_features
+        self.edge_features = edge_features
+        self.hidden_dim = hidden_dim
+
+        # Embedding layers
+        self.W_v = nn.Linear(node_features, hidden_dim // 2, bias=True)
+        self.W_e = nn.Linear(edge_features, hidden_dim, bias=True)
+        if one_hot_src:
+            self.W_s = nn.Embedding(num_letters, hidden_dim // 2)
+        else:
+            self.W_s = nn.Linear(num_letters, hidden_dim // 2, bias=True)
+        if pe:
+            self.pe = PositionalEncoding(hidden_dim)
+        else:
+            self.pe = nn.Identity()
+        layer = TransformerLayer if not use_mpnn else MPNNLayer
+
+        # Decoder layers
+        self.decoder_layers = nn.ModuleList([
+            layer(hidden_dim, hidden_dim * 2, dropout=dropout)
+            for _ in range(num_decoder_layers)
+        ])
+        self.W_out = nn.Linear(hidden_dim, num_letters, bias=True)
+
+        # Initialization
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(self, nodes, edges, connections, src, edge_mask):
+        """
+        Parameters:
+        -----------
+        nodes : torch.Tensor, (N_batch, L, in_channels)
+            Node features
+
+        edges : torch.Tensor, (N_batch, L, K_neighbors, in_channels)
+            Edge features
+
+        connections : torch.Tensor, (N_batch, L, K_neighbors)
+            Node neighbors
+
+        src : torch.Tensor, (N_batch, L)
+            One-hot-encoded sequences
+
+        edge_mask : torch.Tensor, (N_batch, L, k_neighbors)
+            Mask to hide nodes with missing features
+
+        Returns:
+        --------
+        log_probs : torch.Tensor, (N_batch, L, num_letters)
+            Log probs of residue predictions
+        """
+        # Check if structure is available
+        if torch.all(nodes == 0) and torch.all(edges == 0):
+            self.no_structure = True
+        else:
+            self.no_structure = False
+
+        # Prepare node, edge, sequence embeddings
+        h_V = self.W_v(nodes)  # (N, L, h_dim // 2)
+        h_V = self.pe(h_V)
+        h_E = self.W_e(edges) * edge_mask  # (N, L, k, h_dim // 2)
+        h_S = self.W_s(src)  # (N, L, h_dim)
+
+        # Prepare masks
+        # Masking if no structure is available
+        if self.no_structure:
+            h_V *= 0
+            h_E *= 0
+
+        h_V = torch.cat([h_V, h_S], dim=-1)  # N, L, h_dim
+
+        # Run decoder
+        for i, layer in enumerate(self.decoder_layers):
+            h_EV = cat_neighbors_nodes(h_V, h_E, connections)  # N, L, k, 2 * h_dim
+            h_V = layer(h_V, h_EV, mask_V=None)
+        logits = self.W_out(h_V)
         return logits
 
 
