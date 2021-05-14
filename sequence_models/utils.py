@@ -65,14 +65,14 @@ def parse_fasta(fasta_fpath, return_names=False):
     seqs = []
     with open(fasta_fpath) as f_in:
         current = ''
-        names = [f_in.readline()[1:-1]]
+        names = [f_in.readline()[1:].replace('\n', '')]
         for line in f_in:
             if line[0] == '>':
                 seqs.append(current)
                 current = ''
-                names.append(line[1:-1])
+                names.append(line[1:].replace('\n', ''))
             else:
-                current += line[:-1]
+                current += line.replace('\n', '')
         seqs.append(current)
     if return_names:
         return seqs, names
