@@ -675,7 +675,6 @@ class Struct2SeqDecoder(nn.Module):
             for _ in range(num_decoder_layers)
         ])
         self.W_out = nn.Linear(hidden_dim, num_letters, bias=True)
-
         # Initialization
         for p in self.parameters():
             if p.dim() > 1:
@@ -685,11 +684,12 @@ class Struct2SeqDecoder(nn.Module):
         N_nodes = connections.size(1)
         ii = torch.arange(N_nodes, device=connections.device)
         ii = ii.view((1, -1, 1))
-        fmask = connections - ii < 0
+        if self.direction == 'forward':
+            fmask = connections - ii < 0
+        else:
+            fmask = connections - ii > 0
         fmask = fmask.type(torch.float32).unsqueeze(-1)
-        bmask = connections - ii < 0
-        bmask = bmask.type(torch.float32).unsqueeze(-1)
-        return fmask, bmask
+        return fmask
 
 
     def forward(self, nodes, edges, connections, src, edge_mask,):
@@ -733,39 +733,36 @@ class Struct2SeqDecoder(nn.Module):
         h_S = self.W_s(src) # (N, L, h_dim)
 
         # Prepare masks
-        mask_fw, mask_bw = self._autoregressive_mask(connections)
+        mask_fw = self._autoregressive_mask(connections)
 
-        
         # Masking if no structure is available
         if self.no_structure:
             h_V *= 0
             h_E *= 0
-        
-        
+
         # Prepare h_ES, only contain edge info, we will handle sequence info separately based on direction
         h_ES = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)
         h_ES = edge_mask * h_ES
         # Prepare future structure information
-        h_E_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)  # (N, L, k, h_dim*2)
-        h_E_encoder = edge_mask * h_E_encoder # mask edge features with missing data
-        h_EV_encoder = cat_neighbors_nodes(h_V, h_E_encoder, connections) # (N, L, k, h_dim*2)
-        h_EV_encoder = mask_bw * h_EV_encoder # mask past structure info
+        # h_E_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, connections)  # (N, L, k, h_dim*2)
+        # h_E_encoder = edge_mask * h_E_encoder # mask edge features with missing data
+        # h_EV_encoder = cat_neighbors_nodes(h_V, h_E_encoder, connections) # (N, L, k, h_dim*2)
+        # mask_bw = -1 * mask_fw + 1
+        # h_EV_encoder = mask_bw * h_EV_encoder # mask past structure info
         # Prepare sequence information based on direction
         h_S_encoder = cat_neighbors_nodes(h_S, torch.zeros_like(h_E), connections) # (N, L, k, h_dim*2)
         h_S_encoder = cat_neighbors_nodes(torch.zeros_like(h_V), h_S_encoder, connections) # (N, L, k, h_dim*3)
-        if self.direction == 'backward': # use future to predict past
-            h_S_encoder = mask_bw * h_S_encoder
-        if self.direction == 'forward': # use past to predict future
-            h_S_encoder = mask_fw * h_S_encoder
+         # use past to predict future
+        h_S_encoder = mask_fw * h_S_encoder
 
        # Run decoder
         for i, layer in enumerate(self.decoder_layers):
             # h_ESV is concatenated node, edge and seq info
             h_ESV = cat_neighbors_nodes(h_V, h_ES, connections) # (N, L, k, h_dim*3)
-            # apply mask to hide everything in the futre
+            # apply mask to hide everything in the future
             h_ESV = mask_fw * h_ESV
             # read the structure info in the future
-            h_ESV += h_EV_encoder
+            # h_ESV += h_EV_encoder
             # add sequence information according to direction
             h_ESV += h_S_encoder
             # pass to decoder layer
@@ -806,8 +803,8 @@ class BidirectionalStruct2SeqDecoder(nn.Module):
     """
 
     def __init__(self, num_letters, node_features, edge_features,
-                 hidden_dim, num_decoder_layers=3, dropout=0.1, use_mpnn=False
-                 , pe=False, one_hot_src=True):
+                 hidden_dim, num_decoder_layers=3, dropout=0.1,
+                 use_mpnn=False, pe=False, one_hot_src=True):
 
         """
         Parameters:
@@ -849,12 +846,12 @@ class BidirectionalStruct2SeqDecoder(nn.Module):
         self.hidden_dim = hidden_dim
 
         # Embedding layers
-        self.W_v = nn.Linear(node_features, hidden_dim // 2, bias=True)
+        self.W_v = nn.Linear(node_features + num_letters, hidden_dim, bias=True)
         self.W_e = nn.Linear(edge_features, hidden_dim, bias=True)
         if one_hot_src:
-            self.W_s = nn.Embedding(num_letters, hidden_dim // 2)
+            self.W_s = nn.Embedding(num_letters, num_letters)
         else:
-            self.W_s = nn.Linear(num_letters, hidden_dim // 2, bias=True)
+            self.W_s = nn.Identity()
         if pe:
             self.pe = PositionalEncoding(hidden_dim)
         else:
@@ -904,18 +901,19 @@ class BidirectionalStruct2SeqDecoder(nn.Module):
             self.no_structure = False
 
         # Prepare node, edge, sequence embeddings
-        h_V = self.W_v(nodes)  # (N, L, h_dim // 2)
+        h_S = self.W_s(src)  # (N, L, num_letters)
+        nodes = torch.cat([nodes, h_S], dim=-1)
+        h_V = self.W_v(nodes)  # (N, L, h_dim - num_letters)
+        # h_V = torch.cat([h_V, h_S], dim=-1)  # N, L, h_dim
+
         h_V = self.pe(h_V)
-        h_E = self.W_e(edges) * edge_mask  # (N, L, k, h_dim // 2)
-        h_S = self.W_s(src)  # (N, L, h_dim)
+        h_E = self.W_e(edges) * edge_mask  # (N, L, k, h_dim)
 
         # Prepare masks
         # Masking if no structure is available
         if self.no_structure:
             h_V *= 0
             h_E *= 0
-
-        h_V = torch.cat([h_V, h_S], dim=-1)  # N, L, h_dim
 
         # Run decoder
         for i, layer in enumerate(self.decoder_layers):
@@ -1046,5 +1044,27 @@ class StructEncoder(nn.Module):
         for layer in self.layers:
             h_EV = cat_neighbors_nodes(h_V, h_E, connections)
             h_V = layer(h_V, h_EV, mask_V=None)
-        return self.W_out(h_V)
+        else:
+            return self.W_out(h_V)
 
+
+class StructEncoderDecoder(nn.Module):
+
+    def __init__(self, num_letters, node_features, edge_features, hidden_dim, direction='forward', src_node=False,
+                 num_encoder_layers=3, num_decoder_layers=1, dropout=0.1, use_mpnn=True, one_hot_src=True):
+        super(StructEncoderDecoder, self).__init__()
+        self.encoder = StructEncoder(hidden_dim, node_features, edge_features, hidden_dim,
+                                     num_layers=num_encoder_layers, dropout=dropout, use_mpnn=use_mpnn)
+        decoder_node_features = hidden_dim
+        if src_node:
+            decoder_node_features += num_letters
+        self.src_node = src_node
+        self.decoder = Struct2SeqDecoder(num_letters, decoder_node_features, edge_features, hidden_dim,
+                                         num_decoder_layers=num_decoder_layers, dropout=dropout, use_mpnn=use_mpnn,
+                                         one_hot_src=one_hot_src, direction=direction)
+
+    def forward(self, nodes, edges, connections, src, edge_mask):
+        h_V = self.encoder(nodes, edges, connections, edge_mask)
+        if self.src_node:
+            h_V = torch.cat([h_V, src], dim=-1)
+        return self.decoder(h_V, edges, connections, src, edge_mask)
