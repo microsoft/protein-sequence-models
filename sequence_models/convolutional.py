@@ -350,14 +350,19 @@ class ByteNet(nn.Module):
 class ByteNetLM(nn.Module):
 
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                 padding_idx=None, causal=False, dropout=0.0):
+                 padding_idx=None, causal=False, dropout=0.0, final_ln=False):
         super().__init__()
         self.embedder = ByteNet(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
                                 padding_idx=padding_idx, causal=causal, dropout=dropout)
         self.decoder = PositionFeedForward(d_model, n_tokens)
+        if final_ln:
+            self.last_norm = nn.LayerNorm(d_model)
+        else:
+            self.last_norm = nn.Identity()
 
     def forward(self, x, input_mask=None):
         e = self.embedder(x, input_mask=input_mask)
+        e = self.last_norm(e)
         return self.decoder(e)
 
 
