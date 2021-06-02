@@ -1,12 +1,12 @@
 trigger:
-- public-dev
+- master
 pool:
   vmImage: 'windows-latest'
 steps:
 - script: echo Hello, world!'
   displayName: 'Run a one-line script'
 
-- script: |
+- script:
   echo Add other tasks to build, test, and deploy your project.
   echo See https://aka.ms/yaml
   displayName: 'Run a multi-line script'
@@ -31,7 +31,7 @@ steps:
     timeout: '1800'
     ram: '16384'
     addProjectDirToScanningExclusionList: true
-    
+
 - task: ComponentGovernanceComponentDetection@0
   inputs:
     scanType: 'Register'
