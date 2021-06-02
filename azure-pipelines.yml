@@ -7,19 +7,13 @@ steps:
 - task: CredScan@2
   inputs:
     toolMajorVersion: 'V2'
-- task: ESLint@1
-  inputs:
-    Configuration: 'recommended'
-    TargetType: 'eslint'
-    ErrorLevel: 'warn'
 
 - task: Semmle@1
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
   inputs:
     sourceCodeDirectory: '$(Build.SourcesDirectory)'
-    language: 'tsandjs'
-    includeNodeModules: true
+    language: 'python'
     querySuite: 'Recommended'
     timeout: '1800'
     ram: '16384'
