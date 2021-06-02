@@ -3,6 +3,7 @@ trigger:
 pool:
   vmImage: 'windows-latest'
 
+steps:
 - task: CredScan@2
   inputs:
     toolMajorVersion: 'V2'
