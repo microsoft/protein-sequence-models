@@ -13,7 +13,7 @@ steps:
     TargetType: 'eslint'
     ErrorLevel: 'warn'
 
-- task: Semmle@0
+- task: Semmle@1
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
   inputs:
@@ -30,10 +30,3 @@ steps:
     scanType: 'Register'
     verbosity: 'Verbose'
     alertWarningLevel: 'High'
-
-- task: PublishSecurityAnalysisLogs@2
-  inputs:
-    ArtifactName: 'CodeAnalysisLogs'
-    ArtifactType: 'Container'
-    AllTools: true
-    ToolLogsNotFoundAction: 'Standard'
