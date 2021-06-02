@@ -29,7 +29,7 @@ steps:
   inputs:
     scanType: 'Register'
     verbosity: 'Verbose'
-      alertWarningLevel: 'High'
+    alertWarningLevel: 'High'
 
 - task: PublishSecurityAnalysisLogs@2
   inputs:
