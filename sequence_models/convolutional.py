@@ -251,7 +251,7 @@ class ByteNetBlock(nn.Module):
 
     """
 
-    def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1, causal=False, ells=None):
+    def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1, causal=False, ells=None, activation='relu'):
         super().__init__()
         if ells is not None:
             self.conv = HierarchicalCausalConv1d(d_h, d_h, ells,
@@ -260,18 +260,22 @@ class ByteNetBlock(nn.Module):
             self.conv = MaskedCausalConv1d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
         else:
             self.conv = MaskedConv1d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
+        if activation == 'relu':
+            act = nn.ReLU
+        elif activation == 'gelu':
+            act = nn.GELU
         layers1 = [
             nn.LayerNorm(d_in),
-            nn.ReLU(),
+            act(),
             PositionFeedForward(d_in, d_h),
             nn.LayerNorm(d_h),
-            nn.ReLU()
-            ]
+            act()
+        ]
         layers2 = [
             nn.LayerNorm(d_h),
-            nn.ReLU(),
+            act(),
             PositionFeedForward(d_h, d_out),
-            ]
+        ]
         self.sequence1 = nn.Sequential(*layers1)
         self.sequence2 = nn.Sequential(*layers2)
 
@@ -298,7 +302,7 @@ class ByteNet(nn.Module):
     """
 
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                 ells=None, padding_idx=None, causal=False, dropout=0.0):
+                 ells=None, padding_idx=None, causal=False, dropout=0.0, slim=True, activation='relu'):
         """
         :param n_tokens: number of tokens in token dictionary
         :param d_embedding: dimension of embedding
@@ -318,8 +322,12 @@ class ByteNet(nn.Module):
         self.up_embedder = PositionFeedForward(d_embedding, d_model)
         log2 = int(np.log2(r)) + 1
         dilations = [2 ** (n % log2) for n in range(n_layers)]
+        d_h = d_model
+        if slim:
+            d_h = d_h // 2
         layers = [
-            ByteNetBlock(d_model, d_model // 2, d_model, kernel_size, dilation=d, causal=causal, ells=ells)
+            ByteNetBlock(d_model, d_h, d_model, kernel_size, dilation=d, causal=causal,
+                         ells=ells, activation=activation)
             for d in dilations
         ]
         self.layers = nn.ModuleList(modules=layers)
@@ -350,10 +358,11 @@ class ByteNet(nn.Module):
 class ByteNetLM(nn.Module):
 
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                 padding_idx=None, causal=False, dropout=0.0, final_ln=False):
+                 padding_idx=None, causal=False, dropout=0.0, final_ln=False, slim=True, activation='relu'):
         super().__init__()
         self.embedder = ByteNet(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                                padding_idx=padding_idx, causal=causal, dropout=dropout)
+                                padding_idx=padding_idx, causal=causal, dropout=dropout,
+                                slim=slim, activation=activation)
         self.decoder = PositionFeedForward(d_model, n_tokens)
         if final_ln:
             self.last_norm = nn.LayerNorm(d_model)
