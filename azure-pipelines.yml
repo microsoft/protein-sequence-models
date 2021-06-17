@@ -1,0 +1,26 @@
+trigger:
+- master
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+- task: CredScan@2
+  inputs:
+    toolMajorVersion: 'V2'
+
+- task: Semmle@1
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+  inputs:
+    sourceCodeDirectory: '$(Build.SourcesDirectory)'
+    language: 'python'
+    querySuite: 'Recommended'
+    timeout: '1800'
+    ram: '16384'
+    addProjectDirToScanningExclusionList: true
+
+- task: ComponentGovernanceComponentDetection@0
+  inputs:
+    scanType: 'Register'
+    verbosity: 'Verbose'
+    alertWarningLevel: 'High'
