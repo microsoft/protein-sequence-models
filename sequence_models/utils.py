@@ -22,14 +22,16 @@ def transformer_lr(n_warmup_steps):
     return get_lr
 
 
-def get_metrics(fname, new=False):
+def get_metrics(fname, new=False, tokens=False):
     with open(fname) as f:
         lines = f.readlines()
     valid_lines = []
     train_lines = []
+    all_train_lines = []
     for i, line in enumerate(lines):
         if 'Training' in line and 'loss' in line:
             last_train = line
+            all_train_lines.append(line)
         if 'Validation complete' in line:
             valid_lines.append(lines[i - 1])
             train_lines.append(last_train)
@@ -41,14 +43,34 @@ def get_metrics(fname, new=False):
         idx_loss += 2
         idx_accu += 2
         idx_step += 2
+    if tokens:
+        idx_loss += 2
+        idx_accu += 2
+        idx_tok = 10
+    tok_correction = 0
+    last_raw_toks = 0
     for t, v in zip(train_lines, valid_lines):
         step = int(t.split()[idx_step])
         t_loss = float(t.split()[idx_loss])
         t_accu = float(t.split()[idx_accu][:6])
         v_loss = float(v.split()[idx_loss])
         v_accu = float(v.split()[idx_accu][:6])
-        metrics.append((step, t_loss, t_accu, v_loss, v_accu))
-    metrics = pd.DataFrame(metrics, columns=['step', 'train_loss', 'train_accu', 'valid_loss', 'valid_accu'])
+        if tokens:
+            toks = int(t.split()[idx_tok])
+            if toks < last_raw_toks:
+                tok_correction += last_raw_toks
+                doubled = int(all_train_lines[-1].split()[idx_tok]) - int(all_train_lines[-999].split()[idx_tok])
+                tok_correction -= doubled
+            last_raw_toks = toks
+            metrics.append((step, toks + tok_correction, t_loss, t_accu, v_loss, v_accu))
+
+        else:
+            metrics.append((step, t_loss, t_accu, v_loss, v_accu))
+    if tokens:
+        metrics = pd.DataFrame(metrics, columns=['step', 'tokens', 'train_loss',
+                                                 'train_accu', 'valid_loss', 'valid_accu'])
+    else:
+        metrics = pd.DataFrame(metrics, columns=['step', 'train_loss', 'train_accu', 'valid_loss', 'valid_accu'])
     return metrics
 
 
