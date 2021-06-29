@@ -2,7 +2,7 @@ import torch.nn as nn
 
 
 from esm.modules import TransformerLayer, LearnedPositionalEmbedding, RobertaLMHead, ESM1bLayerNorm
-from sequence_models.constants import PROTEIN_ALPHABET, PAD
+from sequence_models.constants import PROTEIN_ALPHABET, PAD, MASK
 
 
 class ESM1b(nn.Module):
@@ -11,7 +11,7 @@ class ESM1b(nn.Module):
                  padding_idx=PROTEIN_ALPHABET.index(PAD), max_positions=1024):
         super(ESM1b, self).__init__()
         self.embed_tokens = nn.Embedding(
-            n_tokens, d_model, padding_idx=padding_idx
+            n_tokens, d_model, padding_idx=PROTEIN_ALPHABET.index(MASK)
         )
         self.layers = nn.ModuleList(
             [
