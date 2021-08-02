@@ -132,7 +132,7 @@ class trRosetta(nn.Module):
         h = F.elu(self.instnorm0(h, input_mask=input_mask))
         for i, layer in enumerate(self.layers):
             if not self.decoder:
-                last_elu = True
+                last_elu = False
             elif i != len(self.layers) - 1:
                 last_elu = True
             else:
