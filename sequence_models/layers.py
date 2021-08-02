@@ -7,14 +7,81 @@ import torch
 import numpy as np
 
 
-class PositionFeedForward(nn.Module):
+class DoubleEmbedding(nn.Module):
 
-    def __init__(self, d_in, d_out):
+    """Embedding layer that allows some frozen and some trainable embeddings.
+
+    An embedding layer where the first n_trainable embeddings are trainable and the
+    remaining n_frozen embeddings are frozen.
+    """
+
+    def __init__(self, n_trainable, n_frozen, embedding_dim, padding_idx=None):
         super().__init__()
-        self.conv = nn.Conv1d(d_in, d_out, 1)
+        if padding_idx is None:
+            train_padding_idx = None
+            freeze_padding_idx = None
+        elif padding_idx < n_trainable:
+            train_padding_idx = padding_idx
+            freeze_padding_idx = None
+        else:
+            train_padding_idx = None
+            freeze_padding_idx = padding_idx - n_trainable
+        self.frozen_offset = n_trainable
+        self.trainable = nn.Embedding(n_trainable, embedding_dim, padding_idx=train_padding_idx)
+        self.frozen = nn.Embedding(n_frozen, embedding_dim, padding_idx=freeze_padding_idx)
+        self.frozen.weight.requires_grad = False
+
+    def forward(self, idx):
+        if idx < self.frozen:
+            return self.trainable(idx)
+        else:
+            return self.frozen(idx - self.frozen_offset)
+
+
+class FactorizedLinear(nn.Module):
+
+    def __init__(self, d_in, d_out, rank):
+        super().__init__()
+        layer = nn.Linear(d_in, d_out)
+        w = layer.weight.data
+        self.bias = layer.bias
+        u, s, v = torch.svd(w)
+        s = torch.diag(s[:rank].sqrt())
+        u = u[:, :rank]
+        v = v.t()[:rank]
+        self.u = nn.Parameter(u @ s)
+        self.v = nn.Parameter(s @ v)
 
     def forward(self, x):
-        return self.conv(x.transpose(1, 2)).transpose(1, 2)
+        w = self.u @ self.v
+        return x @ w.t() + self.bias
+
+
+class PositionFeedForward(nn.Module):
+
+    def __init__(self, d_in, d_out, rank=None):
+        super().__init__()
+        if rank is None:
+            self.conv = nn.Conv1d(d_in, d_out, 1)
+            self.factorized = False
+        else:
+            layer = nn.Linear(d_in, d_out)
+            w = layer.weight.data
+            self.bias = layer.bias
+            u, s, v = torch.svd(w)
+            s = torch.diag(s[:rank].sqrt())
+            u = u[:, :rank]
+            v = v.t()[:rank]
+            self.u = nn.Parameter(u @ s)
+            self.v = nn.Parameter(s @ v)
+            self.factorized = True
+
+    def forward(self, x):
+        if self.factorized:
+            w = self.u @ self.v
+            return x @ w.t() + self.bias
+        else:
+            return self.conv(x.transpose(1, 2)).transpose(1, 2)
 
 
 class PositionFeedForward2d(nn.Module):
