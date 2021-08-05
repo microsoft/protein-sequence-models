@@ -36,7 +36,7 @@ class DoubleEmbedding(nn.Module):
         i = torch.where(idx < self.n_trainable)
         j = torch.where(idx >= self.n_trainable)
         b, ell = idx.shape
-        e = torch.empty(b, ell, self.embedding_dim, device=idx.device)
+        e = torch.empty(b, ell, self.embedding_dim, device=idx.device, dtype=self.trainable.weight.dtype)
         e[i] = self.trainable(idx[i])
         e[j] = self.frozen(idx[j] - self.n_trainable)
         return e
