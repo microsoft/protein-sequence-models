@@ -26,16 +26,20 @@ class DoubleEmbedding(nn.Module):
         else:
             train_padding_idx = None
             freeze_padding_idx = padding_idx - n_trainable
-        self.frozen_offset = n_trainable
+        self.n_trainable = n_trainable
+        self.embedding_dim = embedding_dim
         self.trainable = nn.Embedding(n_trainable, embedding_dim, padding_idx=train_padding_idx)
         self.frozen = nn.Embedding(n_frozen, embedding_dim, padding_idx=freeze_padding_idx)
         self.frozen.weight.requires_grad = False
 
     def forward(self, idx):
-        if idx < self.frozen:
-            return self.trainable(idx)
-        else:
-            return self.frozen(idx - self.frozen_offset)
+        i = torch.where(idx < self.n_trainable)
+        j = torch.where(idx >= self.n_trainable)
+        b, ell = idx.shape
+        e = torch.empty(b, ell, self.embedding_dim, device=idx.device)
+        e[i] = self.trainable(idx[i])
+        e[j] = self.frozen(idx[j] - self.n_trainable)
+        return e
 
 
 class FactorizedLinear(nn.Module):
