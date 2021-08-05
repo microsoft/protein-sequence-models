@@ -49,12 +49,11 @@ class FactorizedLinear(nn.Module):
         s = torch.diag(s[:rank].sqrt())
         u = u[:, :rank]
         v = v.t()[:rank]
-        self.u = nn.Parameter(u @ s)
-        self.v = nn.Parameter(s @ v)
+        self.u = nn.Parameter((u @ s).t())
+        self.v = nn.Parameter((s @ v).t())
 
     def forward(self, x):
-        w = self.u @ self.v
-        return x @ w.t() + self.bias
+        return x @ self.v @ self.u + self.bias
 
 
 class PositionFeedForward(nn.Module):
