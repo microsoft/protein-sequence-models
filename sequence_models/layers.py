@@ -32,7 +32,7 @@ class DoubleEmbedding(nn.Module):
         self.frozen.weight.requires_grad = False
 
     def forward(self, idx):
-        if idx < self.frozen:
+        if idx < self.n_frozen:
             return self.trainable(idx)
         else:
             return self.frozen(idx - self.frozen_offset)
