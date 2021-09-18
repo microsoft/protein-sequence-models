@@ -303,7 +303,7 @@ class ByteNet(nn.Module):
     """
 
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r, rank=None, n_frozen_embs=None,
-                 ells=None, padding_idx=None, causal=False, dropout=0.0, slim=True, activation='relu'):
+                 ells=None, padding_idx=None, causal=False, dropout=0.0, slim=True, activation='relu', down_embed=True):
         """
         :param n_tokens: number of tokens in token dictionary
         :param d_embedding: dimension of embedding
@@ -324,7 +324,11 @@ class ByteNet(nn.Module):
                                                 d_embedding, padding_idx=padding_idx)
         else:
             self.embedder = nn.Identity()
-        self.up_embedder = PositionFeedForward(d_embedding, d_model)
+        if down_embed:
+            self.up_embedder = PositionFeedForward(d_embedding, d_model)
+        else:
+            self.up_embedder = nn.Identity()
+            assert n_tokens == d_embedding
         log2 = int(np.log2(r)) + 1
         dilations = [2 ** (n % log2) for n in range(n_layers)]
         d_h = d_model
@@ -363,12 +367,17 @@ class ByteNet(nn.Module):
 class ByteNetLM(nn.Module):
 
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r, rank=None, n_frozen_embs=None,
-                 padding_idx=None, causal=False, dropout=0.0, final_ln=False, slim=True, activation='relu'):
+                 padding_idx=None, causal=False, dropout=0.0, final_ln=False, slim=True, activation='relu',
+                 tie_weights=False):
         super().__init__()
         self.embedder = ByteNet(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                                padding_idx=padding_idx, causal=causal, dropout=dropout,
+                                padding_idx=padding_idx, causal=causal, dropout=dropout, down_embed=tie_weights,
                                 slim=slim, activation=activation, rank=rank, n_frozen_embs=n_frozen_embs)
-        self.decoder = PositionFeedForward(d_model, n_tokens)
+        if tie_weights:
+            self.decoder = nn.Linear(d_model, n_tokens, bias=False)
+            self.decoder.weight = self.embedder.embedder.weight
+        else:
+            self.decoder = PositionFeedForward(d_model, n_tokens)
         if final_ln:
             self.last_norm = nn.LayerNorm(d_model)
         else:
