@@ -203,44 +203,6 @@ class MaskedCausalConv1d(nn.Module):
         return activations
 
 
-class HierarchicalCausalConv1d(MaskedCausalConv1d):
-
-    """
-         Shape:
-            Input: (N, L, in_channels)
-            input_mask: (N, L, 1), optional
-            Output: (N, L, , out_channels)
-    """
-
-    def __init__(self, in_channels, out_channels, ells, kernel_size=1, dilation=1, groups=1, init=None):
-        """
-        :param d_in: input channels dimension
-        :param d_h: hidden dimension
-        :param out_channels: output channels dimension
-        :param kernel_size: the kernel width
-        :param dilation: dilation factor
-        :param groups: perform depth-wise convolutions
-        :param causal: if True, chooses MaskedCausalConv1d() over MaskedConv1d()
-        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
-        """
-        super().__init__(in_channels, out_channels, kernel_size=kernel_size,
-                         dilation=dilation, groups=groups, init=init)
-        self.ells = ells
-        self.inds = [0]
-        for ell in self.ells:
-            self.inds.append(self.inds[-1] + ell)
-        self.unpad_idx = torch.arange(sum(ells))
-        for ell in np.cumsum(self.ells[:-1]):
-            self.unpad_idx[ell:] += self.zeros
-
-    def _pad(self, x):
-        return torch.cat([MaskedCausalConv1d._pad(self, x[:, :, i: j])
-                          for i, j in zip(self.inds[:-1], self.inds[1:])], dim=2)
-
-    def _unpad(self, x):
-        return x[:, :, self.unpad_idx]
-
-
 class ByteNetBlock(nn.Module):
     """Residual block from ByteNet paper (https://arxiv.org/abs/1610.10099).
          
@@ -251,13 +213,9 @@ class ByteNetBlock(nn.Module):
 
     """
 
-    def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1, causal=False, ells=None, activation='relu',
-                 rank=None):
+    def __init__(self, d_in, d_h, d_out, kernel_size, dilation=1, groups=1, causal=False, activation='relu', rank=None):
         super().__init__()
-        if ells is not None:
-            self.conv = HierarchicalCausalConv1d(d_h, d_h, ells,
-                                                 kernel_size=kernel_size, dilation=dilation, groups=groups)
-        elif causal:
+        if causal:
             self.conv = MaskedCausalConv1d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
         else:
             self.conv = MaskedConv1d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
@@ -303,7 +261,7 @@ class ByteNet(nn.Module):
     """
 
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r, rank=None, n_frozen_embs=None,
-                 ells=None, padding_idx=None, causal=False, dropout=0.0, slim=True, activation='relu', down_embed=True):
+                 padding_idx=None, causal=False, dropout=0.0, slim=True, activation='relu', down_embed=True):
         """
         :param n_tokens: number of tokens in token dictionary
         :param d_embedding: dimension of embedding
@@ -311,9 +269,13 @@ class ByteNet(nn.Module):
         :param n_layers: number of layers of ByteNet block
         :param kernel_size: the kernel width
         :param r: used to calculate dilation factor
-        :param ells: if not None, use HierarchialCausalConv1d() over MaskedCausalConv1d() or MaskedConv1d()
         :padding_idx: location of padding token in ordered alphabet
         :param causal: if True, chooses MaskedCausalConv1d() over MaskedConv1d()
+        :param rank: rank of compressed weight matrices
+        :param n_frozen_embs: number of frozen embeddings
+        :param slim: if True, use half as many dimensions in the NLP as in the CNN
+        :param activation: 'relu' or 'gelu'
+        :param down_embed: if True, have lower dimension for initial embedding than in CNN layers
         """
         super().__init__()
         if n_tokens is not None:
@@ -336,7 +298,7 @@ class ByteNet(nn.Module):
             d_h = d_h // 2
         layers = [
             ByteNetBlock(d_model, d_h, d_model, kernel_size, dilation=d, causal=causal, rank=rank,
-                         ells=ells, activation=activation)
+                         activation=activation)
             for d in dilations
         ]
         self.layers = nn.ModuleList(modules=layers)
