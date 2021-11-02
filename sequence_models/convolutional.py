@@ -368,10 +368,10 @@ class ByteNetLM(nn.Module):
 
     def __init__(self, n_tokens, d_embedding, d_model, n_layers, kernel_size, r, rank=None, n_frozen_embs=None,
                  padding_idx=None, causal=False, dropout=0.0, final_ln=False, slim=True, activation='relu',
-                 tie_weights=False):
+                 tie_weights=False, down_embed=True):
         super().__init__()
         self.embedder = ByteNet(n_tokens, d_embedding, d_model, n_layers, kernel_size, r,
-                                padding_idx=padding_idx, causal=causal, dropout=dropout, down_embed=tie_weights,
+                                padding_idx=padding_idx, causal=causal, dropout=dropout, down_embed=down_embed,
                                 slim=slim, activation=activation, rank=rank, n_frozen_embs=n_frozen_embs)
         if tie_weights:
             self.decoder = nn.Linear(d_model, n_tokens, bias=False)
