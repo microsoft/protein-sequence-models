@@ -22,12 +22,12 @@ class SimpleCollater(object):
     def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
         sequences = data[0]
-        if self.backwards:
-            sequences = [s[::-1] for s in sequences]
         prepped = self._prep(sequences)
         return prepped
 
     def _prep(self, sequences):
+        if self.backwards:
+            sequences = [s[::-1] for s in sequences]
         sequences = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in sequences]
         if self.pad:
             pad_idx = self.tokenizer.alphabet.index(PAD)
