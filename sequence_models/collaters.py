@@ -6,13 +6,35 @@ import torch
 import torch.nn.functional as F
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD, START, STOP, MASK, PROTEIN_ALPHABET, trR_ALPHABET
+from sequence_models.constants import PAD, START, STOP, MASK
 from sequence_models.constants import ALL_AAS
 from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
 from sequence_models.trRosetta_utils import trRosettaPreprocessing
 
 
+def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
+    """Utility function that pads batches to the same length."""
+    batch_size = len(tokenized)
+    max_len = max(len(t) for t in tokenized)
+    output = torch.zeros((batch_size, max_len), dtype=tokenized[0].dtype) + value
+    for row, t in enumerate(tokenized):
+        output[row, :len(t)] = t
+    return output
+
+
 class SimpleCollater(object):
+    """A collater that pads and possibly reverses batches of sequences.
+
+    Parameters:
+        alphabet (str)
+        pad (Boolean)
+        backwards (Boolean)
+
+    If sequences are reversed, the padding is still on the right!
+
+    Input (list): a batch of sequences as strings
+    Output (torch.LongTensor): tokenized batch of sequences
+    """
 
     def __init__(self, alphabet: str, pad=False, backwards=False):
         self.pad = pad
@@ -38,6 +60,14 @@ class SimpleCollater(object):
 
 
 class TAPECollater(SimpleCollater):
+    """Collater for TAPE datasets.
+
+    For single-dimensional outputs, this pads the sequences and masks and batches everything.
+
+    For ss, this also pads the output with -100.
+
+    For contacts, this pads the contacts on the bottom and right.
+    """
 
     def __init__(self, alphabet: str, pad=True):
         super().__init__(alphabet, pad=pad)
@@ -55,14 +85,12 @@ class TAPECollater(SimpleCollater):
             y = torch.tensor(y)
 
         elif len(y[0].shape) == 1:  # secondary structure
-            # mask = [torch.ones_like(yi) for yi in y]
-            # mask = _pad(mask, -100)
             y = _pad(y, -100).long()
 
         elif len(y[0].shape) == 2:  # contact
             max_len = max(len(i) for i in y)
             mask = [F.pad(mask_i,
-                      (0, max_len - len(mask_i), 0, max_len - len(mask_i)), value=False) for mask_i in mask]
+                          (0, max_len - len(mask_i), 0, max_len - len(mask_i)), value=False) for mask_i in mask]
             mask = torch.stack(mask, dim=0)
             y = [F.pad(yi, (0, max_len - len(yi), 0, max_len - len(yi))) for yi in y]
             y = torch.stack(y, dim=0).float()
@@ -71,6 +99,21 @@ class TAPECollater(SimpleCollater):
 
 
 class LMCollater(SimpleCollater):
+    """Collater for autoregressive sequence models.
+
+    Parameters:
+        alphabet (str)
+        pad (Boolean)
+        backwards (Boolean)
+
+    If sequences are reversed, the padding is still on the right!
+
+    Input (list): a batch of sequences as strings
+    Output:
+        src (torch.LongTensor): START + input + padding
+        tgt (torch.LongTensor): input + STOP + padding
+        mask (torch.LongTensor): 1 where tgt is not padding
+    """
 
     def __init__(self, alphabet: str, pad=False, backwards=False):
         super().__init__(alphabet, pad=pad)
@@ -99,16 +142,22 @@ class LMCollater(SimpleCollater):
         return src, tgt, mask
 
 
-def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
-    batch_size = len(tokenized)
-    max_len = max(len(t) for t in tokenized)
-    output = torch.zeros((batch_size, max_len), dtype=tokenized[0].dtype) + value
-    for row, t in enumerate(tokenized):
-        output[row, :len(t)] = t
-    return output
-
-
 class AncestorCollater(LMCollater):
+    """Collater for autoregressive sequence models with ancestors.
+
+    Parameters:
+        alphabet (str)
+        pad (Boolean)
+        backwards (Boolean)
+
+    If sequences are reversed, the padding is still on the right!
+
+    Input (list): a batch of sequences as strings
+    Output:
+        src (torch.LongTensor): START + input + STOP + ancestor  + padding
+        tgt (torch.LongTensor): input + STOP + ancestor + STOP + padding
+        mask (torch.LongTensor): 1 where tgt is not padding
+    """
 
     def __call__(self, batch):
         data = tuple(zip(*batch))
@@ -126,6 +175,18 @@ class AncestorCollater(LMCollater):
 
 
 class MLMCollater(SimpleCollater):
+    """Collater for masked language sequence models.
+
+    Parameters:
+        alphabet (str)
+        pad (Boolean)
+
+    Input (list): a batch of sequences as strings
+    Output:
+        src (torch.LongTensor): corrupted input + padding
+        tgt (torch.LongTensor): input + padding
+        mask (torch.LongTensor): 1 where loss should be calculated for tgt
+    """
 
     def _prep(self, sequences):
         tgt = list(sequences[:])
@@ -161,56 +222,45 @@ class MLMCollater(SimpleCollater):
         return src, tgt, mask
 
 
-class StructureImageCollater(object):
-
-    def __init__(self, sequence_collater: SimpleCollater, backwards=False):
-        self.sequence_collater = sequence_collater
-        self.backwards = backwards
-
-    def __call__(self, batch: List[Any]) -> Iterable[torch.Tensor]:
-        sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
-        collated_seqs = self.sequence_collater._prep(sequences)
-        ells = [len(s) for s in sequences]
-        max_ell = max(ells)
-        n = len(sequences)
-        structure = torch.zeros(n, max_ell, max_ell, 4)
-        structure_mask = torch.zeros(n, max_ell, max_ell)
-        for i, (dist, omega, theta, phi, ell) in enumerate(zip(dists, omegas, thetas, phis, ells)):
-            st = torch.stack([dist, omega, theta, phi], dim=-1)  # ell, ell, 4
-            if self.backwards:
-                st = torch.flip(st, [0, 1])
-            structure[i, :ell, :ell, :] = st
-            structure_mask[i, :ell, :ell] = 1.0
-        structure[torch.isnan(structure)] = 0.0
-        return (*collated_seqs, structure, structure_mask)
-
-
 class StructureCollater(object):
+    """Collater for combined seq/str GNNs.
 
-    def __init__(self, sequence_collater: SimpleCollater, n_connections=20, backwards=False,
-                 n_node_features=10, n_edge_features=11):
+    Parameters:
+        sequence collater (SimpleCollater)
+        n_connections (int)
+        n_node_features (int)
+        n_edge_features (int)
+        startstop (boolean): if true, expect the sequence collater to add starts/stops, and adds an
+            extra zeroed node at the left of the graph.
+
+    Input (list): a batch of sequences as strings
+    Output:
+        sequences from sequence_collater
+        nodes, edges, connections, edge_mask for GNN
+    """
+
+    def __init__(self, sequence_collater: SimpleCollater, n_connections=20,
+                 n_node_features=10, n_edge_features=11, startstop=False):
         self.sequence_collater = sequence_collater
         self.n_connections = n_connections
-        self.backwards = backwards
         self.n_node_features = n_node_features
         self.n_edge_features = n_edge_features
+        if startstop:
+            self.start = 1
+        else:
+            self.start = 0
 
     def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
         sequences, dists, omegas, thetas, phis = tuple(zip(*batch))
         collated_seqs = self.sequence_collater._prep(sequences)
         ells = [len(s) for s in sequences]
-        max_ell = max(ells)
+        max_ell = max(ells) + self.start
         n = len(sequences)
         nodes = torch.zeros(n, max_ell, self.n_node_features)
         edges = torch.zeros(n, max_ell, self.n_connections, self.n_edge_features)
         connections = torch.zeros(n, max_ell, self.n_connections, dtype=torch.long)
         edge_mask = torch.zeros(n, max_ell, self.n_connections, 1)
         for i, (ell, dist, omega, theta, phi) in enumerate(zip(ells, dists, omegas, thetas, phis)):
-            if self.backwards:
-                dist = torch.flip(dist, [0, 1])
-                omega = torch.flip(omega, [0, 1])
-                theta = torch.flip(theta, [0, 1])
-                phi = torch.flip(phi, [0, 1])
             # process features
             V = get_node_features(omega, theta, phi)
             dist.fill_diagonal_(np.nan)
@@ -221,15 +271,19 @@ class StructureCollater(object):
             V = replace_nan(V)
             # reshape
             nc = min(ell - 1, self.n_connections)
-            nodes[i, :ell] = V
-            edges[i, :ell, :nc] = E
-            connections[i, :ell, :nc] = E_idx
+            nodes[i, self.start: self.start + ell] = V
+            edges[i, self.start: self.start + ell, :nc] = E
+            connections[i, self.start: self.start + ell, :nc] = E_idx
             str_mask = str_mask.view(1, ell, -1)
-            edge_mask[i, :ell, :nc, 0] = str_mask
+            edge_mask[i, self.start: self.start + ell, :nc, 0] = str_mask
         return (*collated_seqs, nodes, edges, connections, edge_mask)
 
 
 class StructureOutputCollater(object):
+    """Collater that batches sequences and ell x ell structure targets.
+
+    Currently cannot deal with starts/stops!
+    """
 
     def __init__(self, sequence_collater: SimpleCollater, exp=True):
         self.exp = exp
@@ -263,6 +317,7 @@ class StructureOutputCollater(object):
 
     
 class TAPE2trRosettaCollater(SimpleCollater):
+    """Does trRosetta preprocessing for TAPE datasets. """
 
     def __init__(self, alphabet: str, pad=True):
         super().__init__(alphabet, pad=pad)
@@ -309,6 +364,12 @@ class TAPE2trRosettaCollater(SimpleCollater):
     
 
 class MSAStructureCollater(StructureOutputCollater):
+    """Collater that batches msas and ell x ell structure targets.
+
+    Currently cannot deal with starts/stops!
+
+    MSAs should be pre-tokenized.
+    """
 
     def __init__(self, pad_idx):
         self.pad_idx = pad_idx
@@ -329,90 +390,70 @@ class MSAStructureCollater(StructureOutputCollater):
 
 class MSAGapCollater(object):
 
-    def __init__(self, alphabet, input_type, output_type, random_seq, n_connections=20):
-        """
+    def __init__(self, sequence_collater, n_connections=30, direction='bidirectional'):
+        """Collater for gap probability prediction with a GNN. y is (p_gap, 1 - p_gap).
+
+        For bidirectional:
+            
+
         Args:
-            alphabet: str,
-                protein alphabet
-            input_type: str
-                type of input data, 'structure' or 'sequence'
-            output_type:
-                type of output data, 'gap_prob' or 'lm'
-            n_connections: int
-                if structure is input data type, number of connections
+            sequence_collater: should only return src
+            direction (str
+            n_connections (int)
+
+        Returns:
+            seqs, anchor_seq, nodes, edges, connections, edge_mask, y, mask_y
         """
         # collaters
-        self.simple_collater = SimpleCollater(alphabet=alphabet, pad=True)
-        self.structure_collater = StructureCollater(self.simple_collater, n_connections=n_connections)
-        self.mlm_collater = MLMCollater(alphabet=alphabet+MASK, pad=True)
-        
-        # data type
-        self.input_type = input_type
-        self.output_type = output_type
-
-        # grab tokenizer just in case
-        self.alphabet = alphabet
-        self.tokenizer = Tokenizer(alphabet)
-        
-        self.random_seq = random_seq
+        self.sequence_collater = sequence_collater
+        self.structure_collater = StructureCollater(self.sequence_collater,
+                                                    n_connections=n_connections,
+                                                    startstop=False)
+        self.direction = direction
+        self.pad_idx = sequence_collater.tokenizer.alphabet.index(PAD)
+        if direction != 'bidirectional':
+            self.start_idx = sequence_collater.tokenizer.alphabet.index(START)
 
     def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
-        if self.input_type == 'structure':
-            if self.random_seq: 
-                seq, anchor_seq, dist, omega, theta, phi, y, y_mask = tuple(zip(*batch))
-                # batch anchor seq
-                anchor_seq = _pad(anchor_seq, self.alphabet.index(PAD))
+        seq, anchor_seq, dist, omega, theta, phi, y, y_mask = tuple(zip(*batch))
+        anchor_seq = _pad(anchor_seq, self.pad_idx)
+        seq = [self.sequence_collater.tokenizer.untokenize(i.numpy()) for i in seq]
+        if self.direction != 'bidirectional':  # If necessary, insert STARTS and pad beginning or end of structures
+            if self.direction == 'forward':
+                anchor_seq = torch.cat([torch.ones(len(anchor_seq), 1, dtype=anchor_seq.dtype) * self.start_idx,
+                                        anchor_seq],
+                                       dim=1)
+                seq = [START + s for s in seq]
+                pad_list = [1, 0, 1, 0]
             else:
-                seq, anchor_seq, dist, omega, theta, phi, y, y_mask = tuple(zip(*batch))
-#                 anchor_seq = None
-                anchor_seq = _pad(anchor_seq, self.alphabet.index(PAD))
-            seq = [self.tokenizer.untokenize(i.numpy()) for i in seq]
-            rebatch = [(seq[i], dist[i], omega[i], theta[i], phi[i]) for i in range(len(seq))]
-            seqs, nodes, edges, connections, edge_mask = self.structure_collater.__call__(rebatch)
-            
-            mask_x = None
-            X = (seqs, anchor_seq, nodes, edges, connections, edge_mask) 
+                anchor_seq = torch.cat([anchor_seq,
+                                        torch.ones(len(anchor_seq), 1, dtype=anchor_seq.dtype) * self.start_idx],
+                                       dim=1)
+                seq = [s + START for s in seq]
+                pad_list = [0, 1, 0, 1]
+            dist = [F.pad(d, pad_list, value=0.0) for d in dist]
+            omega = [F.pad(d, pad_list, value=0.0) for d in omega]
+            theta = [F.pad(d, pad_list, value=0.0) for d in theta]
+            phi = [F.pad(d, pad_list, value=0.0) for d in phi]
 
-        elif self.input_type == 'sequence':  # by design, y is gap prob
-            seq, y = tuple(zip(*batch))
-            mask_x = [torch.ones_like(i).bool() for i in seq]
-            seq = _pad(seq, 20)
-            mask_x = _pad(mask_x, False)
-            X = seq
+        rebatch = [(seq[i], dist[i], omega[i], theta[i], phi[i]) for i in range(len(seq))]
+        seqs, nodes, edges, connections, edge_mask = self.structure_collater.__call__(rebatch)
+        X = (seqs, anchor_seq, nodes, edges, connections, edge_mask)
 
-        if (self.output_type == 'gap-prob'):
-            mask_y = [torch.ones_like(i).bool() for i in y]
-            y = _pad(y, 0)
-            mask_y = _pad(mask_y, False)
-            # adjust y format to fit kldivloss
-            y = y.unsqueeze(-1)
-            y = torch.cat((y, torch.ones_like(y)-y), -1)
-        
-        if (self.output_type == 'lm'):
-            if y_mask[0] is not None:
-                mask_y = _pad(y_mask, False)
-            else:
-                mask_y = [torch.ones_like(i).bool() for i in y]
-                mask_y = _pad(mask_y, False)
-            y = _pad(y, 20)
-            
-        if self.output_type == 'mlm':
-            y = _pad(y, 0)
-            # repackage input seqs
-            seqs = X[0]
-            seqs = [self.tokenizer.untokenize(i.numpy()) for i in seqs]
-            rebatch = [tuple([i]) for i in seqs]
-            seqs, _, mask_y  = self.mlm_collater.__call__(rebatch)
-            mask_y = mask_y.bool()
-            if self.input_type == 'structure':
-                X = (seqs, anchor_seq, nodes, edges, connections, edge_mask)
-            elif self.input_type == 'sequence':
-                X = (seqs)
-                
-        return X + (mask_x, y, mask_y)
+        mask_y = [torch.ones_like(i).bool() for i in y]
+        y = _pad(y, 0)
+        mask_y = _pad(mask_y, False)
+        if self.direction != 'bidirectional':
+            y = F.pad(y, [0, 1, 0, 0], value=0)
+            mask_y = F.pad(mask_y, [0, 1, 0, 0], value=False)
+        # adjust y format to fit kldivloss
+        y = y.unsqueeze(-1)
+        y = torch.cat((y, torch.ones_like(y) - y), -1)
+        return X + (y, mask_y)
 
 
 class Seq2PropertyCollater(SimpleCollater):
+    """A collater that batches sequences and a 1d target. """
 
     def __init__(self, alphabet: str, pad=True):
         super().__init__(alphabet, pad=pad)
