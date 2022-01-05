@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD, START, STOP, MASK
+from sequence_models.constants import PAD, GAP, START, STOP, MASK
 from sequence_models.constants import ALL_AAS
 from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
 from sequence_models.trRosetta_utils import trRosettaPreprocessing
@@ -390,16 +390,18 @@ class MSAStructureCollater(StructureOutputCollater):
 
 class MSAGapCollater(object):
 
-    def __init__(self, sequence_collater, n_connections=30, direction='bidirectional'):
+    def __init__(self, sequence_collater, n_connections=30, direction='bidirectional', task='gap-prob'):
         """Collater for gap probability prediction with a GNN. y is (p_gap, 1 - p_gap).
 
+        Uses MASK to pad to distinguish between GAP and padding. 
         For bidirectional:
             
 
         Args:
             sequence_collater: should only return src
-            direction (str
+            direction (str)
             n_connections (int)
+            task (str): gap-prob or ar
 
         Returns:
             seqs, anchor_seq, nodes, edges, connections, edge_mask, y, mask_y
@@ -410,45 +412,72 @@ class MSAGapCollater(object):
                                                     n_connections=n_connections,
                                                     startstop=False)
         self.direction = direction
-        self.pad_idx = sequence_collater.tokenizer.alphabet.index(PAD)
+        self.pad_idx = sequence_collater.tokenizer.alphabet.index(MASK)
         if direction != 'bidirectional':
             self.start_idx = sequence_collater.tokenizer.alphabet.index(START)
+        self.task = task
+        self.gap_idx = sequence_collater.tokenizer.alphabet.index(GAP)
+
+    def _add_start(self, seq=None, anchor_seq=None, dist=None, omega=None, theta=None, phi=None):
+        # If necessary, insert STARTS and pad beginning or end of structures
+        if self.direction != 'bidirectional':  
+            if self.direction == 'forward':
+                if anchor_seq is not None:
+                    anchor_seq = torch.cat([torch.ones(len(anchor_seq), 1, dtype=anchor_seq.dtype) * self.start_idx,
+                                            anchor_seq],
+                                        dim=1)
+                if seq is not None:
+                    seq = [START + s for s in seq]
+                pad_list = [1, 0, 1, 0]
+            else:
+                if anchor_seq is not None:
+                    anchor_seq = torch.cat([anchor_seq,
+                                            torch.ones(len(anchor_seq), 1, dtype=anchor_seq.dtype) * self.start_idx],
+                                        dim=1)
+                if seq is not None:
+                    seq = [s + START for s in seq]
+                pad_list = [0, 1, 0, 1]
+            if dist is not None:
+                dist = [F.pad(d, pad_list, value=0.0) for d in dist]
+            if omega is not None:
+                omega = [F.pad(d, pad_list, value=0.0) for d in omega]
+            if theta is not None:
+                theta = [F.pad(d, pad_list, value=0.0) for d in theta]
+            if phi is not None:
+                phi = [F.pad(d, pad_list, value=0.0) for d in phi]
+        return seq, anchor_seq, dist, omega, theta, phi
 
     def __call__(self, batch: List[Any], ) -> Iterable[torch.Tensor]:
         seq, anchor_seq, dist, omega, theta, phi, y, y_mask = tuple(zip(*batch))
         anchor_seq = _pad(anchor_seq, self.pad_idx)
         seq = [self.sequence_collater.tokenizer.untokenize(i.numpy()) for i in seq]
-        if self.direction != 'bidirectional':  # If necessary, insert STARTS and pad beginning or end of structures
-            if self.direction == 'forward':
-                anchor_seq = torch.cat([torch.ones(len(anchor_seq), 1, dtype=anchor_seq.dtype) * self.start_idx,
-                                        anchor_seq],
-                                       dim=1)
-                seq = [START + s for s in seq]
-                pad_list = [1, 0, 1, 0]
-            else:
-                anchor_seq = torch.cat([anchor_seq,
-                                        torch.ones(len(anchor_seq), 1, dtype=anchor_seq.dtype) * self.start_idx],
-                                       dim=1)
-                seq = [s + START for s in seq]
-                pad_list = [0, 1, 0, 1]
-            dist = [F.pad(d, pad_list, value=0.0) for d in dist]
-            omega = [F.pad(d, pad_list, value=0.0) for d in omega]
-            theta = [F.pad(d, pad_list, value=0.0) for d in theta]
-            phi = [F.pad(d, pad_list, value=0.0) for d in phi]
-
+        # If necessary, insert STARTS and pad beginning or end of structures
+        seq, anchor_seq, dist, omega, theta, phi = self._add_start(seq=seq, anchor_seq=anchor_seq,
+                                                                   dist=dist, omega=omega, theta=theta, phi=phi)
         rebatch = [(seq[i], dist[i], omega[i], theta[i], phi[i]) for i in range(len(seq))]
         seqs, nodes, edges, connections, edge_mask = self.structure_collater.__call__(rebatch)
         X = (seqs, anchor_seq, nodes, edges, connections, edge_mask)
 
-        mask_y = [torch.ones_like(i).bool() for i in y]
-        y = _pad(y, 0)
-        mask_y = _pad(mask_y, False)
-        if self.direction != 'bidirectional':
+        if self.task == 'gap-prob':
+            y = _pad(y, 0)
+            mask_y = [torch.ones_like(i).bool() for i in y]            
+            mask_y = _pad(mask_y, False)    
+            if self.direction != 'bidirectional':
+                y = F.pad(y, [0, 1, 0, 0], value=0)
+                mask_y = F.pad(mask_y, [0, 1, 0, 0], value=False)
+            # adjust y format to fit kldivloss
+            y = y.unsqueeze(-1)
+            y = torch.cat((y, torch.ones_like(y) - y), -1)
+        elif self.direction == 'forward':
+            y = (seqs[:, 1:] == self.gap_idx).long()
             y = F.pad(y, [0, 1, 0, 0], value=0)
-            mask_y = F.pad(mask_y, [0, 1, 0, 0], value=False)
-        # adjust y format to fit kldivloss
-        y = y.unsqueeze(-1)
-        y = torch.cat((y, torch.ones_like(y) - y), -1)
+            mask_y = (seqs[:, 1:] != self.pad_idx).float()
+            mask_y = F.pad(mask_y, [0, 1, 0, 0], value=0.0)
+        else:
+            y = (seqs == self.gap_idx).long()
+            m1 = (seqs != self.pad_idx).float()
+            m2 = (seqs != self.start_idx).float()
+            mask_y = torch.logical_and(m1, m2)
         return X + (y, mask_y)
 
 
