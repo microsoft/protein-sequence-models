@@ -395,6 +395,17 @@ class MSAGapCollater(object):
 
         Uses MASK to pad to distinguish between GAP and padding. 
         For bidirectional:
+            src: <seq><MASKs>
+            tgt: <pre><mask this out>
+        
+        For forward: 
+            src: <START><seq><MASKs>
+            tgt:        <seq><MASKs>
+        
+        for backward:
+            src: <seq><START><MASKs>
+            tgt: <seq><MASKs       >
+
             
 
         Args:
