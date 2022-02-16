@@ -8,10 +8,11 @@ from sequence_models.constants import PROTEIN_ALPHABET, PAD, MASK
 class ESM1b(nn.Module):
 
     def __init__(self, d_model, d_hidden, n_layers, n_heads, n_tokens=len(PROTEIN_ALPHABET),
-                 padding_idx=PROTEIN_ALPHABET.index(PAD), max_positions=1024):
+                 padding_idx=PROTEIN_ALPHABET.index(PAD), mask_idx=PROTEIN_ALPHABET.index(MASK),
+                 max_positions=1024):
         super(ESM1b, self).__init__()
         self.embed_tokens = nn.Embedding(
-            n_tokens, d_model, padding_idx=PROTEIN_ALPHABET.index(MASK)
+            n_tokens, d_model, padding_idx=mask_idx
         )
         self.layers = nn.ModuleList(
             [
