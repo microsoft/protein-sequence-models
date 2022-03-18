@@ -392,7 +392,7 @@ class TRRDataset(Dataset):
             tokenizer:
                 Use this to untokenize sequence if desired
         """
-        filenames = data_dir + dataset + '_files.txt'
+        filenames = data_dir + dataset + 'list.txt'
         self.filenames = np.loadtxt(filenames, dtype=str)
         self.data_dir = data_dir
         self.return_msa = return_msa
@@ -407,7 +407,7 @@ class TRRDataset(Dataset):
         return len(self.filenames)
 
     def __getitem__(self, idx):
-        filename = self.data_dir + 'npz/' + self.filenames[idx]
+        filename = self.data_dir + 'npz/' + self.filenames[idx] + '.npz'
         data = np.load(filename)
         if self.return_msa:
             s = torch.tensor(data['msa'])
