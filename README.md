@@ -10,7 +10,7 @@ pip install sequence-models
 
 ### Convolutional autoencoding representations of proteins (CARP)
 
-We make available pretrained CNN protein sequence masked language models of various sizes. All of these have a ByteNet encoder architecture and are pretrained on the March 2020 release of UniRef50 using the same masked language modeling task as in BERT and ESM-1b. Models require PyTorch. We tested on `v1.9.0`. 
+We make available pretrained CNN protein sequence masked language models of various sizes. All of these have a ByteNet encoder architecture and are pretrained on the March 2020 release of UniRef50 using the same masked language modeling task as in BERT and ESM-1b. Models require PyTorch. We tested on `v1.9.0` and `v1.11.0`. If you installed into a clean conda environment, you may also need to install pandas, scipy, and wget. 
 
 To load a model:
 
