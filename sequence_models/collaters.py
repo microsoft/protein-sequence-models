@@ -285,9 +285,10 @@ class StructureOutputCollater(object):
     Currently cannot deal with starts/stops!
     """
 
-    def __init__(self, sequence_collater: SimpleCollater, exp=True):
+    def __init__(self, sequence_collater: SimpleCollater, exp=True, dist_only=False):
         self.exp = exp
         self.sequence_collater = sequence_collater
+        self.dist_only = dist_only
 
     def _pad(self, squares, ells, value=0.0):
         max_len = max(ells)
@@ -310,6 +311,8 @@ class StructureOutputCollater(object):
         masks = [~torch.isnan(phi) & m for phi, m in zip(phis, masks)]
         masks = self._pad(masks, ells, value=False)
         dists = self._pad(dists, ells)
+        if self.dist_only:
+            return seqs, dists, masks
         omegas = self._pad(omegas, ells)
         thetas = self._pad(thetas, ells)
         phis = self._pad(phis, ells)
