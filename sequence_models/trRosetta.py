@@ -65,7 +65,7 @@ class trRosetta(nn.Module):
     
     """trRosetta for single model"""
 
-    def __init__(self, n2d_layers=61, model_id='a', decoder=True, p_dropout=0.0):
+    def __init__(self, d_init=526, n2d_layers=61, model_id='a', decoder=True, p_dropout=0.0):
         """
         Parameters:
         -----------
@@ -79,7 +79,7 @@ class trRosetta(nn.Module):
         """
         super(trRosetta, self).__init__()
 
-        self.conv0 = nn.Conv2d(526, 64, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
+        self.conv0 = nn.Conv2d(d_init, 64, kernel_size=1, stride=1, padding=pad_size(1, 1, 1))
         self.instnorm0 = MaskedInstanceNorm2d(64, eps=1e-06, affine=True)
 
         dilation = 1
