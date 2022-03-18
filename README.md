@@ -2,6 +2,39 @@ Pytorch modules and utilities for modeling biological sequence data.
 
 Here we will demonstrate the application of several tools we hope will help with modeling biological sequences.
 
+### Installation
+
+```
+pip install sequence-models
+```
+
+### Convolutional autoencoding representations of sequence (CARP)
+
+We make available pretrained CNN protein sequence masked language models of various sizes. All of these have a ByteNet encoder architecture and are pretrained on the March 2020 release of UniRef50 using the same masked language modeling task as in BERT and ESM-1b. Models require PyTorch. We tested on `v1.9.0`. 
+
+To load a model:
+
+```
+from sequence_models.pretrained import load_model_and_alphabet
+
+model, collater = load_model_and_alphabet('carp_640M')
+```
+
+The available models are `carp_600k`, `carp_38M`, `carp_76M`, and `carp_640M`. 
+
+You can also download the weights and hyperparameters manually from [Zenodo](https://zenodo.org/account/settings/applications/tokens/97060/). 
+
+To encode a batch of sequences: 
+
+```
+seqs = [['MDREQ'], ['MGTRRLLP']]
+x = collater(seqs)  # (n, max_len)
+rep = model(x)  # (n, max_len, d_model)
+```
+
+The collater will pad sequences to the maximum length, and the model automatically ignores the padding. 
+
+
 ### Sequence Datasets and Dataloaders
 In ```sampler.py```, you will find two Pytorch sampler classes: ```SortishSampler```, a sampler to sort similarly length 
  sample sequences into length-defined buckets; and ```ApproxBatchSampler```, a batch sampler which grabs sequences 
