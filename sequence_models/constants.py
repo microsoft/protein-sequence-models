@@ -46,4 +46,32 @@ THETA_BINS = np.concatenate([np.array([np.nan]), np.linspace(0, 2 * np.pi, 25)])
 PHI_BINS = np.concatenate([np.array([np.nan]), np.linspace(0, np.pi, 13)])
 OMEGA_BINS = np.concatenate([np.array([np.nan]), np.linspace(0, 2 * np.pi, 25)])
 
+IUPAC_CODES = {
+    "Ala": "A",
+    "Arg": "R",
+    "Asn": "N",
+    "Asp": "D",
+    "Cys": "C",
+    "Gln": "Q",
+    "Glu": "E",
+    "Gly": "G",
+    "His": "H",
+    "Ile": "I",
+    "Leu": "L",
+    "Lys": "K",
+    "Met": "M",
+    "Phe": "F",
+    "Pro": "P",
+    "Ser": "S",
+    "Thr": "T",
+    "Trp": "W",
+    "Val": "V",
+    "Tyr": "Y",
+    "Asx": "B",
+    "Sec": "U",
+    "Xaa": "X",
+    "Glx": "Z",
+}
+
+
 
