@@ -870,7 +870,7 @@ class BidirectionalStruct2SeqDecoder(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, nodes, edges, connections, src, edge_mask):
+    def forward(self, nodes, edges, connections, src, edge_mask, decoder=True):
         """
         Parameters:
         -----------
@@ -919,8 +919,11 @@ class BidirectionalStruct2SeqDecoder(nn.Module):
         for i, layer in enumerate(self.decoder_layers):
             h_EV = cat_neighbors_nodes(h_V, h_E, connections)  # N, L, k, 2 * h_dim
             h_V = layer(h_V, h_EV, mask_V=None)
-        logits = self.W_out(h_V)
-        return logits
+        if decoder:
+            logits = self.W_out(h_V)
+            return logits
+        else:
+            return h_V
 
 
 class Struct2Property(Struct2SeqDecoder):
@@ -974,11 +977,8 @@ class StructEncoder(nn.Module):
         hidden_dim : int
             hidden dim
 
-        num_encoder_layers : int
+        num_layers : int
             number of encoder layers
-
-        num_decoder_layers : int
-            number of decoder layers
 
         dropout : float
             dropout
