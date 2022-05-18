@@ -197,7 +197,7 @@ class TAPEDataset(Dataset):
 
 class CSVDataset(Dataset):
 
-    def __init__(self, fpath=None, df=None, split=None, outputs=[]):
+    def __init__(self, fpath=None, df=None, split=None, outputs=[], max_len=np.inf):
         if df is None:
             self.data = pd.read_csv(fpath)
         else:
@@ -206,13 +206,19 @@ class CSVDataset(Dataset):
             self.data = self.data[self.data['split'] == split]
         self.outputs = outputs
         self.data = self.data[['sequence'] + self.outputs]
+        self.max_len = max_len
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         row = self.data.iloc[idx]
-        return [row['sequence'], *row[self.outputs]]
+        sequence = row['sequence']
+        if len(sequence) > self.max_len:
+            start = np.random.choice(len(sequence) - self.max_len)
+            stop = start + self.max_len
+            sequence = sequence[start:stop]
+        return [sequence, *row[self.outputs]]
 
 
 class FlatDataset(Dataset):
