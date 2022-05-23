@@ -22,7 +22,7 @@ model, collater = load_model_and_alphabet('carp_640M')
 
 The available models are `carp_600k`, `carp_38M`, `carp_76M`, and `carp_640M`. 
 
-You can also download the weights and hyperparameters manually from [Zenodo](https://zenodo.org/account/settings/applications/tokens/97060/). 
+You can also download the weights and hyperparameters manually from [Zenodo](https://doi.org/10.5281/zenodo.6368483). 
 
 To encode a batch of sequences: 
 
