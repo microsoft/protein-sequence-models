@@ -8,9 +8,9 @@ Here we will demonstrate the application of several tools we hope will help with
 pip install sequence-models
 ```
 
-### Convolutional autoencoding representations of proteins (CARP)
+### Loading pretrained models
 
-We make available pretrained CNN protein sequence masked language models of various sizes. All of these have a ByteNet encoder architecture and are pretrained on the March 2020 release of UniRef50 using the same masked language modeling task as in BERT and ESM-1b. Models require PyTorch. We tested on `v1.9.0` and `v1.11.0`. If you installed into a clean conda environment, you may also need to install pandas, scipy, and wget. 
+ Models require PyTorch. We tested on `v1.9.0` and `v1.11.0`. If you installed into a clean conda environment, you may also need to install pandas, scipy, and wget. 
 
 To load a model:
 
@@ -20,19 +20,57 @@ from sequence_models.pretrained import load_model_and_alphabet
 model, collater = load_model_and_alphabet('carp_640M')
 ```
 
-The available models are `carp_600k`, `carp_38M`, `carp_76M`, and `carp_640M`. 
+Available models are
+- `carp_600k`
+- `carp_38M`
+- `carp_76M`
+- `carp_640M`
+- `mif`
+- `mifst`
 
-You can also download the weights and hyperparameters manually from [Zenodo](https://doi.org/10.5281/zenodo.6368483). 
+### Convolutional autoencoding representations of proteins (CARP)
+
+We make available pretrained CNN protein sequence masked language models of various sizes. All of these have a ByteNet encoder architecture and are pretrained on the March 2020 release of UniRef50 using the same masked language modeling task as in BERT and ESM-1b.
+
+CARP is described in this [preprint](https://doi.org/10.1101/2022.05.19.492714).
+
+
+You can also download the weights manually from [Zenodo](https://doi.org/10.5281/zenodo.6368483). 
 
 To encode a batch of sequences: 
 
 ```
 seqs = [['MDREQ'], ['MGTRRLLP']]
-x = collater(seqs)  # (n, max_len)
+x = collater(seqs)[0]  # (n, max_len)
 rep = model(x)  # (n, max_len, d_model)
 ```
 
-The collater will pad sequences to the maximum length, and the model automatically ignores the padding. 
+### Masked Inverse Folding (MIF) and Masked Inverse Folding with Sequence Transfer (MIF-ST)
+
+We make available pretrained masked inverse folding models with and without sequence pretraining transfer from CARP-640M.
+
+[comment]: <> (MIF and MIF-ST are described in this [preprint]&#40;&#41;.)
+
+You can also download the weights manually from [Zenodo](https://doi.org/10.1234/mifst). 
+
+To encode a sequence with its structure: 
+
+```
+from sequence_models.pdb_utils import parse_PDB, process_coords
+coords, wt, _ = parse_PDB('examples/gb1_a60fb_unrelaxed_rank_1_model_5.pdb')
+coords = {
+        'N': coords[:, 0],
+        'CA': coords[:, 1],
+        'C': coords[:, 2]
+    }
+dist, omega, theta, phi = process_coords(coords)
+batch = [[wt, torch.tensor(dist, dtype=torch.float),
+          torch.tensor(omega, dtype=torch.float),
+          torch.tensor(theta, dtype=torch.float), torch.tensor(phi, dtype=torch.float)]]
+src, nodes, edges, connections, edge_mask = collater(batch)
+rep = model(src, nodes, edges, connections, edge_mask)
+```
+
 
 
 ### Sequence Datasets and Dataloaders

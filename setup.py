@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="sequence-models",
-    version="1.0.0",
+    version="1.1.0",
     author="Kevin Yang",
     author_email="yang.kevin@microsoft.com",
     description="Machine learning for sequences.",
