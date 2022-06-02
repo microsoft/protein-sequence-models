@@ -25,7 +25,7 @@ def load_carp(model_data):
                       final_ln=True, slim=slim)
     sd = model_data['model_state_dict']
     model.load_state_dict(sd)
-    model = CARP(model)
+    model = CARP(model.eval())
     return model
 
 def load_gnn(model_data):
@@ -36,7 +36,7 @@ def load_gnn(model_data):
                                          pe=False, one_hot_src=one_hot_src)
     sd = model_data['model_state_dict']
     gnn.load_state_dict(sd)
-    return gnn
+    return gnn.eval()
 
 def load_model_and_alphabet(model_name):
     if not model_name.endswith(".pt"):  # treat as filepath
