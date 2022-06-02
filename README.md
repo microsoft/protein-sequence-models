@@ -49,7 +49,7 @@ rep = model(x)  # (n, max_len, d_model)
 
 We make available pretrained masked inverse folding models with and without sequence pretraining transfer from CARP-640M.
 
-[comment]: <> (MIF and MIF-ST are described in this [preprint]&#40;&#41;.)
+MIF and MIF-ST are described in this [preprint](https://doi.org/10.1101/2022.05.25.493516)
 
 You can also download the weights manually from [Zenodo](https://doi.org/10.1234/mifst). 
 
