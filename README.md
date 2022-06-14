@@ -51,7 +51,7 @@ We make available pretrained masked inverse folding models with and without sequ
 
 MIF and MIF-ST are described in this [preprint](https://doi.org/10.1101/2022.05.25.493516)
 
-You can also download the weights manually from [Zenodo](https://doi.org/10.1234/mifst). 
+You can also download the weights manually from [Zenodo](https://zenodo.org/record/6573779/files/). 
 
 To encode a sequence with its structure: 
 
