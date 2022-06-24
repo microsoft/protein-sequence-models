@@ -595,3 +595,137 @@ class MSAGapDataset(Dataset):
             y = torch.LongTensor(msa[np.random.choice(msa.shape[0])])  # get random seq from msa
             y_mask = None
             return y, y_mask
+
+
+class TRRMSADataset(Dataset):
+    """Build dataset for trRosetta data: MSA Absorbing Diffusion model"""
+
+    def __init__(self, n_sequences=64, npz_dir=None):
+        """
+        Args:
+            n_sequences: int,
+                number of sequences to subsample down to
+            npz_dir: str,
+                if you have a specified npz directory
+        """
+
+        # Get npz_data dir
+        if npz_dir is not None:
+            self.npz_dir = npz_dir
+        else:
+            raise FileNotFoundError(npz_dir)
+
+        # MSAs should be in the order of npz_dir
+        all_files = os.listdir(self.npz_dir)
+        self.filenames = all_files  # IDs of samples to include
+
+        # Number of sequences to subsample down to
+        self.n_sequences = n_sequences
+
+        self.tokenizer = Tokenizer(trR_ALPHABET)
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):  # TODO: add error checking?
+        filename = self.filenames[idx]
+        data = np.load(self.npz_dir + filename)
+
+        # Grab sequence info
+        msa = data['msa']
+        msa = [self.tokenizer.untokenize(s) for s in msa]  # Untokenize sequences, msa is a list of strings
+
+        anchor_seq = msa[0]  # This is the query sequence in MSA
+
+        # TODO: keep "unique" sequences when subsampling rather than random
+        MSA_num_seqs = len(msa)
+        output = []
+
+        # If fewer sequences in MSA than self.n_sequences,
+        # create sequences padded with STOP token
+        if MSA_num_seqs < self.n_sequences:
+            diff = self.n_sequences - MSA_num_seqs
+            MSA_seq_len = len(anchor_seq)
+            padded_seq = [STOP] * MSA_seq_len
+            output.append(msa)
+            for i in range(diff):
+                output.append(padded_seq)
+        elif MSA_num_seqs == self.n_sequences:
+            output.append(msa)
+        else:
+            random_idx = np.random.choice(MSA_num_seqs - 1, size=self.n_sequences - 1, replace=False)
+            random_idx += 1
+            sample_seq = np.array(msa)[random_idx]
+            output.append(anchor_seq)
+            # output.append(sample_seq)
+            for seq in sample_seq:
+                output.append(seq)
+
+        return list(output)
+
+
+class A3MMSADataset(Dataset):
+    """Build dataset for A3M data: MSA Absorbing Diffusion model"""
+
+    def __init__(self, split, n_sequences=64, data_dir=None):
+        """
+        Args:
+            n_sequences: int,
+                number of sequences to subsample down to
+            data_dir: str,
+                if you have a specified data directory
+        """
+
+        # Get npz_data dir
+        if data_dir is not None:
+            self.data_dir = data_dir
+        else:
+            raise FileNotFoundError(data_dir)
+
+        self.split = split
+
+        if self.split == 'valid':
+            self.data_dir += 'valid/'
+        else:
+            self.data_dir += 'test/'
+
+        all_files = os.listdir(self.data_dir)
+        self.filenames = all_files  # IDs of samples to include
+
+        # Number of sequences to subsample down to
+        self.n_sequences = n_sequences
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):  # TODO: add error checking?
+        filename = self.filenames[idx]
+        parsed_msa = parse_fasta(self.data_dir + filename, idx)
+
+        anchor_seq = parsed_msa[0]  # This is the query sequence in MSA
+
+        # TODO: keep "unique" sequences when subsampling rather than random
+        MSA_num_seqs = len(parsed_msa)
+        output = []
+
+        # If fewer sequences in MSA than self.n_sequences,
+        # create sequences padded with STOP token
+        if MSA_num_seqs < self.n_sequences:
+            diff = self.n_sequences - MSA_num_seqs
+            MSA_seq_len = len(anchor_seq)
+            padded_seq = [STOP] * MSA_seq_len
+            output += parsed_msa
+            for i in range(diff):
+                output.append(padded_seq)
+        elif MSA_num_seqs == self.n_sequences:
+            output += parsed_msa
+        else:
+            random_idx = np.random.choice(MSA_num_seqs - 1, size=self.n_sequences - 1, replace=False)
+            random_idx += 1
+            sample_seq = np.array(parsed_msa)[random_idx]
+            output.append(anchor_seq)
+            # output.append(sample_seq)
+            for seq in sample_seq:
+                output.append(seq)
+
+        return list(output)
