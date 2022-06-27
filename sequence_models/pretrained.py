@@ -71,7 +71,7 @@ class CARP(nn.Module):
         self.model = model
 
     def forward(self, x, result='repr'):
-        padding_mask = (x == PROTEIN_ALPHABET.index(PAD))
+        padding_mask = (x != PROTEIN_ALPHABET.index(PAD))
         padding_mask = padding_mask.unsqueeze(-1)
         if result == 'repr':
             return self.model.embedder(x, input_mask=padding_mask)
