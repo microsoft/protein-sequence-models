@@ -14,10 +14,11 @@ import torch
 from torch.utils.data import Dataset
 import pandas as pd
 
-from sequence_models.utils import Tokenizer
-from sequence_models.constants import trR_ALPHABET, DIST_BINS, PHI_BINS, THETA_BINS, OMEGA_BINS
+from sequence_models.utils import Tokenizer, parse_fasta
+from sequence_models.constants import trR_ALPHABET, DIST_BINS, PHI_BINS, THETA_BINS, OMEGA_BINS, STOP, PAD
 from sequence_models.gnn import bins_to_vals
 from sequence_models.pdb_utils import process_coords
+
 
 class LMDBDataset(Dataset):
     """Creates a dataset from an lmdb file.
@@ -74,28 +75,28 @@ class TAPEDataset(Dataset):
                  data_path: Union[str, Path],
                  data_type: str,
                  split: str,
-                 sub_type : str = 'distance',
-                 eps : float = 1e-6,
+                 sub_type: str = 'distance',
+                 eps: float = 1e-6,
                  in_memory: bool = False,
                  max_len=700):
 
         """
         data_path : path to data directory
 
-        data_type : name of downstream task, [fluorescence, stability, remote_homology, 
+        data_type : name of downstream task, [fluorescence, stability, remote_homology,
             secondary_structure, contact]
-        
+
         split : data split to load
 
-        contact_method : if data_type == contact, choose 'distance' to get 
+        contact_method : if data_type == contact, choose 'distance' to get
             distance instead of binary contact output
         """
-        
+
         self.data_type = data_type
         self.sub_type = sub_type
         self.eps = eps
         self.max_len = max_len
-        
+
         if data_type == 'fluorescence':
             if split not in ('train', 'valid', 'test'):
                 raise ValueError(f"Unrecognized split: {split}. "
@@ -103,7 +104,7 @@ class TAPEDataset(Dataset):
 
             data_file = Path(data_path + f'fluorescence_{split}.lmdb')
             self.output_label = 'log_fluorescence'
-            
+
         if data_type == 'stability':
             if split not in ('train', 'valid', 'test'):
                 raise ValueError(f"Unrecognized split: {split}. "
@@ -111,7 +112,7 @@ class TAPEDataset(Dataset):
 
             data_file = Path(data_path + f'stability_{split}.lmdb')
             self.output_label = 'stability_score'
-        
+
         if data_type == 'remote_homology':
             if split not in ('train', 'valid', 'test_fold_holdout',
                              'test_family_holdout', 'test_superfamily_holdout'):
@@ -121,7 +122,7 @@ class TAPEDataset(Dataset):
 
             data_file = Path(data_path + f'remote_homology_{split}.lmdb')
             self.output_label = 'fold_label'
-            
+
         if data_type == 'secondary_structure':
             if split not in ('train', 'valid', 'casp12', 'ts115', 'cb513'):
                 raise ValueError(f"Unrecognized split: {split}. Must be one of "
@@ -133,7 +134,7 @@ class TAPEDataset(Dataset):
                 self.output_label = 'ss8'
             else:
                 self.output_label = 'ss3'
-            
+
         if data_type == 'contact':
             if split not in ('train', 'train_unfiltered', 'valid', 'test'):
                 raise ValueError(f"Unrecognized split: {split}. Must be one of "
@@ -141,7 +142,7 @@ class TAPEDataset(Dataset):
 
             data_file = Path(data_path + f'proteinnet_{split}.lmdb')
             self.output_label = 'tertiary'
-            
+
         self.data = LMDBDataset(data_file, in_memory)
 
     def __len__(self) -> int:
@@ -151,10 +152,10 @@ class TAPEDataset(Dataset):
         item = self.data[index]
         primary = item['primary']
         mask = None
-        
+
         if self.data_type in ['fluorescence', 'stability', ]:
             output = float(item[self.output_label][0])
-        
+
         if self.data_type in ['remote_homology']:
             output = item[self.output_label]
             diff = max(len(primary) - self.max_len + 1, 1)
@@ -164,7 +165,7 @@ class TAPEDataset(Dataset):
 
         if self.data_type in ['secondary_structure']:
             # pad with -1s because of cls/sep tokens
-            output = torch.Tensor(item[self.output_label],).to(torch.int8)
+            output = torch.Tensor(item[self.output_label], ).to(torch.int8)
             diff = max(len(primary) - self.max_len + 1, 1)
             start = np.random.choice(diff)
             end = start + self.max_len
@@ -380,7 +381,7 @@ class UniRefDataset(Dataset):
             phi = phi[start:stop, start:stop]
             return consensus, dist, omega, theta, phi
         consensus = consensus[start:stop]
-        return (consensus, )
+        return (consensus,)
 
 
 class TRRDataset(Dataset):
@@ -453,11 +454,11 @@ class TRRDataset(Dataset):
 
         return s, dist, omega, theta, phi
 
-    
-    
+
 class MSAGapDataset(Dataset):
     """Build dataset for trRosetta data: gap-prob and lm/mlm"""
-    def __init__(self, data_dir, dataset, task, pdb=False, y=None, msa=None, 
+
+    def __init__(self, data_dir, dataset, task, pdb=False, y=None, msa=None,
                  random_seq=False, npz_dir=None, reweight=True, mask_endgaps=False):
         """
         Args:
@@ -499,15 +500,15 @@ class MSAGapDataset(Dataset):
         all_npzs = os.listdir(self.npz_dir)
         selected_npzs = [i for i in pdb_ids if i + '.npz' in all_npzs]
         self.filenames = selected_npzs  # ids of samples to include
-        
+
         # X options
         self.pdb = pdb
         self.task = task
         self.random_seq = random_seq
-        
+
         # special options for generating y values
         self.reweight = reweight
-        self.mask_endgaps = mask_endgaps 
+        self.mask_endgaps = mask_endgaps
 
     def __len__(self):
         return len(self.filenames)
@@ -515,10 +516,10 @@ class MSAGapDataset(Dataset):
     def __getitem__(self, idx):
         filename = self.filenames[idx]
         data = np.load(self.npz_dir + filename + '.npz')
-        
+
         # grab sequence info
         if self.msa_path is not None:
-            msa_data = np.load(self.msa_path + filename + ".npz") 
+            msa_data = np.load(self.msa_path + filename + ".npz")
             msa = msa_data['msa']
             weights = msa_data['weights']
         else:
@@ -530,7 +531,7 @@ class MSAGapDataset(Dataset):
             while flag:
                 random_idx = np.random.randint(0, len(msa))
                 base_seq = msa[random_idx]
-                if (base_seq == 20).sum()/len(base_seq) < 0.20:
+                if (base_seq == 20).sum() / len(base_seq) < 0.20:
                     flag = False
         else:
             base_seq = anchor_seq
@@ -541,14 +542,14 @@ class MSAGapDataset(Dataset):
             y = y_data['y']
             y_mask = y_data['y_mask']
         elif self.task == "gap-prob":
-            if self.reweight: # downsampling
-                y = ((msa == 20) * weights.T).sum(0)/msa.shape[0]
+            if self.reweight:  # downsampling
+                y = ((msa == 20) * weights.T).sum(0) / msa.shape[0]
                 y = torch.FloatTensor(y)
             else:
                 y = torch.FloatTensor(np.sum(msa == 20, axis=0) / msa.shape[0])
             y_mask = None
         else:  # lm
-#             y, y_mask = self._get_lm_y(msa)
+            #             y, y_mask = self._get_lm_y(msa)
             y = torch.LongTensor(base_seq)
             y_mask = None
         # choose X type
@@ -600,7 +601,7 @@ class MSAGapDataset(Dataset):
 class TRRMSADataset(Dataset):
     """Build dataset for trRosetta data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, n_sequences=64, npz_dir=None):
+    def __init__(self, n_sequences=64, max_seq_len=1024, npz_dir=None):
         """
         Args:
             n_sequences: int,
@@ -621,8 +622,11 @@ class TRRMSADataset(Dataset):
 
         # Number of sequences to subsample down to
         self.n_sequences = n_sequences
+        self.max_seq_len = max_seq_len
 
-        self.tokenizer = Tokenizer(trR_ALPHABET)
+        alphabet = trR_ALPHABET + PAD
+        self.tokenizer = Tokenizer(alphabet)
+        self.alpha = np.array(list(alphabet))
 
     def __len__(self):
         return len(self.filenames)
@@ -633,35 +637,35 @@ class TRRMSADataset(Dataset):
 
         # Grab sequence info
         msa = data['msa']
-        msa = [self.tokenizer.untokenize(s) for s in msa]  # Untokenize sequences, msa is a list of strings
 
         anchor_seq = msa[0]  # This is the query sequence in MSA
+        anchor_seq = np.expand_dims(anchor_seq, axis=0)
 
         # TODO: keep "unique" sequences when subsampling rather than random
-        MSA_num_seqs = len(msa)
-        output = []
+        msa_num_seqs = len(msa)
+        msa_seq_length = anchor_seq.shape[1]
+        if msa_seq_length > self.max_seq_len:
+            seq_len = self.max_seq_len
+        else:
+            seq_len = msa_seq_length
+
+        output = msa[:, :seq_len]
 
         # If fewer sequences in MSA than self.n_sequences,
         # create sequences padded with STOP token
-        if MSA_num_seqs < self.n_sequences:
-            diff = self.n_sequences - MSA_num_seqs
-            MSA_seq_len = len(anchor_seq)
-            padded_seq = [STOP] * MSA_seq_len
-            output.append(msa)
-            for i in range(diff):
-                output.append(padded_seq)
-        elif MSA_num_seqs == self.n_sequences:
-            output.append(msa)
-        else:
-            random_idx = np.random.choice(MSA_num_seqs - 1, size=self.n_sequences - 1, replace=False)
+        if msa_num_seqs < self.n_sequences:
+            pad_array = np.full(shape=(self.n_sequences, seq_len), fill_value=self.tokenizer.pad_id)
+            pad_array[:msa_num_seqs] = msa[:, :seq_len]
+            output = pad_array
+        elif msa_num_seqs > self.n_sequences:
+            random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False)
             random_idx += 1
-            sample_seq = np.array(msa)[random_idx]
-            output.append(anchor_seq)
-            # output.append(sample_seq)
-            for seq in sample_seq:
-                output.append(seq)
+            sample_array = np.concatenate((anchor_seq, msa[random_idx]), axis=0)
+            output = sample_array[:, :seq_len]
 
-        return list(output)
+        output = [''.join(seq) for seq in self.alpha[output]]
+
+        return output
 
 
 class A3MMSADataset(Dataset):

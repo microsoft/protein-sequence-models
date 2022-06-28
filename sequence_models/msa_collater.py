@@ -50,6 +50,7 @@ class MSAAbsorbingCollater():
             curr_msa = np.asarray(curr_msa)
             length, depth = curr_msa.shape  # length = number of seqs in MSA, depth = # AA in MSA
             t = np.random.choice(length * depth)  # Pick timestep t
+            t += 1  # ensure t cannot be 0
 
             # Flatten MSA to 1D to mask tokens
             curr_msa = curr_msa.flatten()

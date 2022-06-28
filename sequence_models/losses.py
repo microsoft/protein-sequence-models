@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+import numpy as np
 
 
 class MaskedCosineLoss(nn.Module):
@@ -139,9 +140,8 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
 
     Shape:
         Inputs:
-            - src (BS, N, L) with masked/corrupted tokens
             - pred: (BS, N, L, n_tokens)
-            - tgt: (BS, N, L)
+            - tgt: (BS, N, L): label, with uncorrupted tokens
             - mask: (BS, N, L) boolean
             - weight: (C, ): class weights for nn.CrossEntropyLoss
     """
@@ -149,7 +149,7 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
     def __init__(self, ignore_index):
         super().__init__(ignore_index=ignore_index, reduction='none')
 
-    def forward(self, src, pred, tgt, mask):
+    def forward(self, pred, tgt, mask):
         # Make sure we have that empty last dimension
         if len(mask.shape) == len(pred.shape) - 1:
             mask = mask.unsqueeze(-1)
@@ -159,16 +159,22 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
 
         # Create re-weighting array
         num_masked_tokens_msa = mask.sum(axis=(1, 2))  # D-t+1 masked tokens per MSA in each batch
+        num_masked_tokens_msa = num_masked_tokens_msa.cpu().numpy().squeeze()
         val_batch = 1 / num_masked_tokens_msa
         rwt = np.repeat(val_batch, num_masked_tokens_msa)
 
         # Select corrupted indices
         p = torch.masked_select(pred, mask)  # TODO: check shape of T, .view(n, -1)
-        t = torch.masked_select(tgt, mask.squeee())
+        print(pred.shape)
+        print(tgt.shape)
+        print(mask.shape)
+        t = torch.masked_select(tgt, mask.squeeze())
+        print(p.shape)
+        print(t.shape)
 
         # Call loss function and re-weight the term
         loss = super().forward(p, t)
-        # print(rwt.shape)
-        # print(loss.shape)
+        print(rwt.shape)
+        print(loss.shape)
         rwt_loss = torch.dot(rwt, loss)
         return rwt_loss
