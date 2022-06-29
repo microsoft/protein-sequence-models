@@ -164,17 +164,13 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
         rwt = np.repeat(val_batch, num_masked_tokens_msa)
 
         # Select corrupted indices
-        p = torch.masked_select(pred, mask)  # TODO: check shape of T, .view(n, -1)
-        print(pred.shape)
-        print(tgt.shape)
-        print(mask.shape)
+        n = mask.sum()
+        p = torch.masked_select(pred, mask).view(n, -1)
         t = torch.masked_select(tgt, mask.squeeze())
-        print(p.shape)
-        print(t.shape)
 
         # Call loss function and re-weight the term
         loss = super().forward(p, t)
-        print(rwt.shape)
-        print(loss.shape)
-        rwt_loss = torch.dot(rwt, loss)
+        rwt = torch.tensor(rwt, dtype=torch.float64)
+        rwt = rwt.to(loss.device)
+        rwt_loss = torch.dot(rwt, loss.to(torch.float64))
         return rwt_loss

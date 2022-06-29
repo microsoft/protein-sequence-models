@@ -7,10 +7,10 @@ from sequence_models.utils import Tokenizer
 from sequence_models.constants import PAD
 
 
-def _pad(tokenized: List, max_len: int, value: int) -> torch.Tensor:
+def _pad(tokenized: List, num_seq: int, max_len: int, value: int) -> torch.Tensor:
     """Utility function that pads batches to the same length."""
     batch_size = len(tokenized)
-    output = torch.zeros((batch_size, 64, max_len), dtype=torch.long) + value
+    output = torch.zeros((batch_size, num_seq, max_len), dtype=torch.long) + value
     for i in range(batch_size):
         tokenized[i] = torch.LongTensor(np.array(tokenized[i]))
         output[i, :, :len(tokenized[i][0])] = tokenized[i]
@@ -29,9 +29,10 @@ class MSAAbsorbingCollater():
         tgt (torch.LongTensor): input + padding
     """
 
-    def __init__(self, alphabet: str, pad_token=PAD):
+    def __init__(self, alphabet: str, pad_token=PAD, num_seq=64):
         self.tokenizer = Tokenizer(alphabet)
         self.pad_idx = self.tokenizer.alphabet.index(pad_token)
+        self.num_seq = num_seq
 
     def __call__(self, batch_msa):
         tgt = list(batch_msa[:])
@@ -66,8 +67,8 @@ class MSAAbsorbingCollater():
                 longest_msa = depth
 
         # Pad sequences
-        src = _pad(src, longest_msa, self.pad_idx)
-        tgt = _pad(tgt, longest_msa, self.pad_idx)
+        src = _pad(src, self.num_seq, longest_msa, self.pad_idx)
+        tgt = _pad(tgt, self.num_seq, longest_msa, self.pad_idx)
 
         mask = (src == self.tokenizer.mask_id)
 
