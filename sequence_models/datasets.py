@@ -744,19 +744,20 @@ class A3MMSADataset(Dataset):
             slice_start = 0
             seq_len = msa_seq_len
 
-        anchor_seq = anchor_seq[slice_start: slice_start + self.max_seq_len]
-
+        # anchor_seq = anchor_seq[:seq_len]
+        # print(len(parsed_msa))
+        # print(parsed_msa)
         gap_str = '-' * msa_seq_len
-        for i in range(len(parsed_msa)):
-            parsed_msa[i] = parsed_msa[i].upper()
-            if parsed_msa[i] == gap_str:
-                parsed_msa.remove(parsed_msa[i])
+        parsed_msa = [seq.upper() for seq in parsed_msa if seq != gap_str]
+        # for i in range(len(parsed_msa)):
+        #     if parsed_msa[i] == gap_str:
+        #         parsed_msa.remove(parsed_msa[i])
 
         # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
         # 'MaxHamming' selection strategy
         if msa_num_seqs < self.n_sequences:
             output = np.full(shape=(self.n_sequences, seq_len), fill_value=self.tokenizer.pad_id)
-            output[:msa_num_seqs] = [seq[slice_start: slice_start + self.max_seq_len] for seq in parsed_msa]  # TODO: do this without for loop
+            output[:msa_num_seqs] = [seq[slice_start: slice_start + seq_len] for seq in parsed_msa]  # TODO: do this without for loop
         elif msa_num_seqs > self.n_sequences:
             if self.selection_type == 'random':
                 parsed_msa = np.array(parsed_msa)
@@ -764,10 +765,10 @@ class A3MMSADataset(Dataset):
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
                 anchor_seq = np.expand_dims(anchor_seq, axis=0)
                 sample_array = np.concatenate((anchor_seq, parsed_msa[random_idx]), axis=0)
-                output = [seq[slice_start: slice_start + self.max_seq_len] for seq in sample_array]  # TODO: do this without for loop
-            else:  # TODO: remove all gap sequences
+                output = [seq[:seq_len] for seq in sample_array]  # TODO: do this without for loop
+            else:
                 output = [anchor_seq]
-                parsed_msa = [seq[slice_start: slice_start + self.max_seq_lenn] for seq in parsed_msa]
+                parsed_msa = [seq[slice_start: slice_start + seq_len] for seq in parsed_msa]
                 msa_subset = parsed_msa[1:]
                 msa_ind = np.arange(msa_num_seqs)[1:]
                 random_ind = np.random.choice(msa_ind)
@@ -788,6 +789,7 @@ class A3MMSADataset(Dataset):
                     msa_subset = np.delete(msa_subset, random_ind)
                     distance_matrix = np.delete(distance_matrix, random_ind, axis=1)
         else:
-            output = [seq[slice_start: slice_start + self.max_seq_len] for seq in parsed_msa]  # TODO: do this without for loop
+            output = [seq[slice_start: slice_start + seq_len] for seq in parsed_msa]  # TODO: do this without for loop
 
+        # print(output)
         return output
