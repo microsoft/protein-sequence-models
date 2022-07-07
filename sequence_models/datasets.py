@@ -684,9 +684,9 @@ class TRRMSADataset(Dataset):
                     distance_matrix = np.delete(distance_matrix, ind, axis=1)
                     distance_matrix.append(curr_dist)
 
-                # then, create a 1 x m matrix comparing that random seq to all others in MSA (minus query seq) --> keep track of this w array of indices?
-                # compute hamming distance for all pairwise combos (so m total first time)
-                # min down each column, then max across row (if tie, pick first?)
+                # then, create a 1 x m matrix comparing that random seq to all others in MSA (minus query seq) -->
+                # keep track of this w array of indices? compute hamming distance for all pairwise combos (so m total
+                # first time) min down each column, then max across row (if tie, pick first?)
                 #
 
         output = [''.join(seq) for seq in self.alpha[output]]
@@ -717,6 +717,8 @@ class A3MMSADataset(Dataset):
             raise FileNotFoundError(data_dir)
 
         all_files = os.listdir(self.data_dir)
+        if 'lengths.npz' in all_files:
+            all_files.remove('lengths.npz')
         self.filenames = all_files  # IDs of samples to include
 
         self.n_sequences = n_sequences
