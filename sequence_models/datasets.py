@@ -696,7 +696,7 @@ class TRRMSADataset(Dataset):
 class A3MMSADataset(Dataset):
     """Build dataset for A3M data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, selection_type, n_sequences=64, max_seq_len=100, data_dir=None):  # max_seq_len = 512
+    def __init__(self, selection_type, n_sequences=64, max_seq_len=512, data_dir=None):  # max_seq_len = 512
         """
         Args:
             selection_type: str,
