@@ -602,7 +602,7 @@ class MSAGapDataset(Dataset):
 class TRRMSADataset(Dataset):
     """Build dataset for trRosetta data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, selection_type, n_sequences=64, max_seq_len=512, npz_dir=None):
+    def __init__(self, selection_type, n_sequences=64, max_seq_len=12, npz_dir=None):
         """
         Args:
             selection_type: str,
@@ -644,7 +644,6 @@ class TRRMSADataset(Dataset):
         # Grab sequence info
         msa = data['msa']
 
-        msa_num_seqs = len(msa)
         msa_seq_len = len(msa[0])
         if msa_seq_len > self.max_seq_len:
             slice_start = np.random.choice(msa_seq_len - self.max_seq_len + 1)
@@ -656,8 +655,8 @@ class TRRMSADataset(Dataset):
         sliced_msa = msa[:, slice_start: slice_start + self.max_seq_len]
         anchor_seq = sliced_msa[0]  # This is the query sequence in MSA
 
-        gap_str = np.full(shape=(msa_seq_len,), fill_value=self.tokenizer.alphabet.index('-'))
-        sliced_msa = [seq for seq in sliced_msa if seq != gap_str]
+        sliced_msa = [seq for seq in sliced_msa if (list(set(seq)) != [self.tokenizer.alphabet.index('-')])]
+        msa_num_seqs = len(sliced_msa)
 
         # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
         # 'MaxHamming' selection strategy
@@ -679,6 +678,7 @@ class TRRMSADataset(Dataset):
                 msa_subset = np.delete(msa_subset, (random_ind - 1), axis=0)
                 m = len(msa_ind) - 1
                 distance_matrix = np.ones((self.n_sequences - 2, m))
+
                 for i in range(self.n_sequences - 2):
                     curr_dist = [hamming(list(random_seq), list(seq)) for seq in msa_subset]
                     curr_dist = np.expand_dims(np.array(curr_dist), axis=0)  # shape is now (1,msa_num_seqs)
