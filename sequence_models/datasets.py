@@ -760,7 +760,6 @@ class A3MMSADataset(Dataset):
         elif msa_num_seqs > self.n_sequences:
             if self.selection_type == 'random':
                 parsed_msa = np.array(parsed_msa)
-                # parsed_msa = np.expand_dims(parsed_msa, axis=0)
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
                 anchor_seq = np.expand_dims(anchor_seq, axis=0)
                 subset_msa = parsed_msa[random_idx]
