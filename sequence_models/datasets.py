@@ -644,7 +644,6 @@ class TRRMSADataset(Dataset):
         anchor_seq = msa[0]  # This is the query sequence in MSA
         anchor_seq = np.expand_dims(anchor_seq, axis=0)
 
-        # TODO: keep "unique" sequences when subsampling rather than random
         msa_num_seqs = len(msa)
         msa_seq_length = anchor_seq.shape[1]
         if msa_seq_length > self.max_seq_len:
@@ -684,9 +683,9 @@ class TRRMSADataset(Dataset):
                     distance_matrix = np.delete(distance_matrix, ind, axis=1)
                     distance_matrix.append(curr_dist)
 
-                # then, create a 1 x m matrix comparing that random seq to all others in MSA (minus query seq) -->
-                # keep track of this w array of indices? compute hamming distance for all pairwise combos (so m total
-                # first time) min down each column, then max across row (if tie, pick first?)
+                # then, create a 1 x m matrix comparing that random seq to all others in MSA (minus query seq) --> keep track of this w array of indices?
+                # compute hamming distance for all pairwise combos (so m total first time)
+                # min down each column, then max across row (if tie, pick first?)
                 #
 
         output = [''.join(seq) for seq in self.alpha[output]]
@@ -697,7 +696,7 @@ class TRRMSADataset(Dataset):
 class A3MMSADataset(Dataset):
     """Build dataset for A3M data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, selection_type, n_sequences=64, max_seq_len=512, data_dir=None):
+    def __init__(self, selection_type, n_sequences=64, max_seq_len=100, data_dir=None):  # max_seq_len = 512
         """
         Args:
             selection_type: str,
@@ -717,8 +716,8 @@ class A3MMSADataset(Dataset):
             raise FileNotFoundError(data_dir)
 
         all_files = os.listdir(self.data_dir)
-        if 'lengths.npz' in all_files:
-            all_files.remove('lengths.npz')
+        # if 'lengths.npz' in all_files:
+        #     all_files.remove('lengths.npz')
         self.filenames = all_files  # IDs of samples to include
 
         self.n_sequences = n_sequences
@@ -746,9 +745,8 @@ class A3MMSADataset(Dataset):
             slice_start = 0
             seq_len = msa_seq_len
 
-        # anchor_seq = anchor_seq[:seq_len]
-        # print(len(parsed_msa))
-        # print(parsed_msa)
+        anchor_seq = anchor_seq[slice_start: slice_start + seq_len]
+
         gap_str = '-' * msa_seq_len
         parsed_msa = [seq.upper() for seq in parsed_msa if seq != gap_str]
         # for i in range(len(parsed_msa)):
@@ -766,8 +764,9 @@ class A3MMSADataset(Dataset):
                 # parsed_msa = np.expand_dims(parsed_msa, axis=0)
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
                 anchor_seq = np.expand_dims(anchor_seq, axis=0)
-                sample_array = np.concatenate((anchor_seq, parsed_msa[random_idx]), axis=0)
-                output = [seq[:seq_len] for seq in sample_array]  # TODO: do this without for loop
+                subset_msa = parsed_msa[random_idx]
+                subset_msa = [seq[slice_start: slice_start + seq_len] for seq in subset_msa]  # TODO: do this without for loop
+                output = np.concatenate((anchor_seq, subset_msa), axis=0)
             else:
                 output = [anchor_seq]
                 parsed_msa = [seq[slice_start: slice_start + seq_len] for seq in parsed_msa]
@@ -793,5 +792,6 @@ class A3MMSADataset(Dataset):
         else:
             output = [seq[slice_start: slice_start + seq_len] for seq in parsed_msa]  # TODO: do this without for loop
 
-        # print(output)
+        str_len = list(map(len, output))
+        print(all(each_len == str_len[0] for each_len in str_len))
         return output
