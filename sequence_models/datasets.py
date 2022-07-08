@@ -694,7 +694,6 @@ class TRRMSADataset(Dataset):
             output = sliced_msa
 
         output = [''.join(seq) for seq in self.alpha[output]]
-
         return output
 
 
