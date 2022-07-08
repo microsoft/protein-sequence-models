@@ -602,11 +602,15 @@ class MSAGapDataset(Dataset):
 class TRRMSADataset(Dataset):
     """Build dataset for trRosetta data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, selection_type, n_sequences=64, max_seq_len=256, npz_dir=None):
+    def __init__(self, selection_type, n_sequences=64, max_seq_len=10, npz_dir=None):
         """
         Args:
+            selection_type: str,
+                MSA selection strategy of random or MaxHamming
             n_sequences: int,
                 number of sequences to subsample down to
+            max_seq_len: int,
+                maximum MSA sequence length
             npz_dir: str,
                 if you have a specified npz directory
         """
@@ -624,12 +628,11 @@ class TRRMSADataset(Dataset):
         # Number of sequences to subsample down to
         self.n_sequences = n_sequences
         self.max_seq_len = max_seq_len
+        self.selection_type = selection_type
 
         alphabet = trR_ALPHABET + PAD
         self.tokenizer = Tokenizer(alphabet)
         self.alpha = np.array(list(alphabet))
-
-        self.selection_type = selection_type
 
     def __len__(self):
         return len(self.filenames)
@@ -641,54 +644,54 @@ class TRRMSADataset(Dataset):
         # Grab sequence info
         msa = data['msa']
 
-        anchor_seq = msa[0]  # This is the query sequence in MSA
-        anchor_seq = np.expand_dims(anchor_seq, axis=0)
-
         msa_num_seqs = len(msa)
-        msa_seq_length = anchor_seq.shape[1]
-        if msa_seq_length > self.max_seq_len:
+        msa_seq_len = len(msa[0])
+        if msa_seq_len > self.max_seq_len:
+            slice_start = np.random.choice(msa_seq_len - self.max_seq_len + 1)
             seq_len = self.max_seq_len
         else:
-            seq_len = msa_seq_length
+            slice_start = 0
+            seq_len = msa_seq_len
 
-        output = msa[:, :seq_len]
+        sliced_msa = msa[:, slice_start: slice_start + self.max_seq_len]
+        anchor_seq = sliced_msa[0]  # This is the query sequence in MSA
+
+        gap_str = np.full(shape=(msa_seq_len,), fill_value=self.tokenizer.alphabet.index('-'))
+        sliced_msa = [seq for seq in sliced_msa if seq != gap_str]
 
         # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
         # 'MaxHamming' selection strategy
         if msa_num_seqs < self.n_sequences:
             pad_array = np.full(shape=(self.n_sequences, seq_len), fill_value=self.tokenizer.pad_id)
-            pad_array[:msa_num_seqs] = msa[:, :seq_len]
-            output = pad_array
+            pad_array[:msa_num_seqs] = sliced_msa
         elif msa_num_seqs > self.n_sequences:
             if self.selection_type == 'random':
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
-                sample_array = np.concatenate((anchor_seq, msa[random_idx]), axis=0)
-                output = sample_array[:, :seq_len]
+                anchor_seq = np.expand_dims(anchor_seq, axis=0)
+                output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
             else:
-                print("hi")
-                msa_subset = msa[1:]
+                output = [list(anchor_seq)]
+                msa_subset = np.asarray(sliced_msa[1:])
                 msa_ind = np.arange(msa_num_seqs)[1:]
                 random_ind = np.random.choice(msa_ind)
-                random_seq = msa[random_ind]
-                msa_subset = np.delete(msa_subset, msa_ind)
-                n = 1
+                random_seq = sliced_msa[random_ind]
+                output.append(list(random_seq))
+                msa_subset = np.delete(msa_subset, (random_ind - 1), axis=0)
                 m = len(msa_ind) - 1
-                distance_matrix = []
-                for i in range(64):
-                    curr_dist = [hamming(random_seq, seq) for seq in msa_subset]
-                    assert (len(curr_dist) == m)
-
-                    # compute dist bw random_seq and m other seqs
-                    # ind = seq that is max of min
-                    distance_matrix = np.delete(distance_matrix, ind, axis=1)
-                    distance_matrix.append(curr_dist)
-
-                # then, create a 1 x m matrix comparing that random seq to all others in MSA (minus query seq) --> keep track of this w array of indices?
-                # compute hamming distance for all pairwise combos (so m total first time)
-                # min down each column, then max across row (if tie, pick first?)
-                #
-
-        output = [''.join(seq) for seq in self.alpha[output]]
+                distance_matrix = np.ones((self.n_sequences - 2, m))
+                for i in range(self.n_sequences - 2):
+                    curr_dist = [hamming(list(random_seq), list(seq)) for seq in msa_subset]
+                    curr_dist = np.expand_dims(np.array(curr_dist), axis=0)  # shape is now (1,msa_num_seqs)
+                    distance_matrix[i] = curr_dist
+                    col_min = np.min(distance_matrix, axis=0)
+                    max_ind = np.argmax(col_min)
+                    random_ind = max_ind
+                    random_seq = msa_subset[random_ind]
+                    output.append(list(random_seq))
+                    msa_subset = np.delete(msa_subset, random_ind, axis=0)
+                    distance_matrix = np.delete(distance_matrix, random_ind, axis=1)
+        else:
+            output = sliced_msa
 
         return output
 
@@ -696,7 +699,7 @@ class TRRMSADataset(Dataset):
 class A3MMSADataset(Dataset):
     """Build dataset for A3M data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, selection_type, n_sequences=64, max_seq_len=512, data_dir=None):  # max_seq_len = 512
+    def __init__(self, selection_type, n_sequences=64, max_seq_len=512, data_dir=None):
         """
         Args:
             selection_type: str,
@@ -704,20 +707,18 @@ class A3MMSADataset(Dataset):
             n_sequences: int,
                 number of sequences to subsample down to
             max_seq_len: int,
-                MSA sequence length
+                maximum MSA sequence length
             data_dir: str,
                 if you have a specified data directory
         """
 
         # Get npz_data dir
         if data_dir is not None:
-            self.data_dir = data_dir  # valid_train/aws
+            self.data_dir = data_dir
         else:
             raise FileNotFoundError(data_dir)
 
         all_files = os.listdir(self.data_dir)
-        # if 'lengths.npz' in all_files:
-        #     all_files.remove('lengths.npz')
         self.filenames = all_files  # IDs of samples to include
 
         self.n_sequences = n_sequences
@@ -749,9 +750,6 @@ class A3MMSADataset(Dataset):
 
         gap_str = '-' * msa_seq_len
         parsed_msa = [seq.upper() for seq in parsed_msa if seq != gap_str]
-        # for i in range(len(parsed_msa)):
-        #     if parsed_msa[i] == gap_str:
-        #         parsed_msa.remove(parsed_msa[i])
 
         # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
         # 'MaxHamming' selection strategy
@@ -792,6 +790,4 @@ class A3MMSADataset(Dataset):
         else:
             output = [seq[slice_start: slice_start + seq_len] for seq in parsed_msa]  # TODO: do this without for loop
 
-        str_len = list(map(len, output))
-        print(all(each_len == str_len[0] for each_len in str_len))
         return output
