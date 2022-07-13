@@ -7,7 +7,7 @@ import json
 import os
 from os import path
 import pickle as pkl
-from scipy.spatial.distance import squareform, pdist, hamming
+from scipy.spatial.distance import squareform, pdist, hamming, cdist
 
 import numpy as np
 import torch
@@ -602,7 +602,7 @@ class MSAGapDataset(Dataset):
 class TRRMSADataset(Dataset):
     """Build dataset for trRosetta data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, selection_type, n_sequences=64, max_seq_len=512, npz_dir=None):
+    def __init__(self, selection_type, n_sequences=64, max_seq_len=256, data_dir=None):
         """
         Args:
             selection_type: str,
@@ -611,18 +611,18 @@ class TRRMSADataset(Dataset):
                 number of sequences to subsample down to
             max_seq_len: int,
                 maximum MSA sequence length
-            npz_dir: str,
+            data_dir: str,
                 if you have a specified npz directory
         """
 
         # Get npz_data dir
-        if npz_dir is not None:
-            self.npz_dir = npz_dir
+        if data_dir is not None:
+            self.data_dir = data_dir
         else:
-            raise FileNotFoundError(npz_dir)
+            raise FileNotFoundError(data_dir)
 
         # MSAs should be in the order of npz_dir
-        all_files = os.listdir(self.npz_dir)
+        all_files = os.listdir(self.data_dir)
         self.filenames = all_files  # IDs of samples to include
 
         # Number of sequences to subsample down to
@@ -639,7 +639,7 @@ class TRRMSADataset(Dataset):
 
     def __getitem__(self, idx):  # TODO: add error checking?
         filename = self.filenames[idx]
-        data = np.load(self.npz_dir + filename)
+        data = np.load(self.data_dir + filename)
 
         # Grab sequence info
         msa = data['msa']
@@ -657,42 +657,52 @@ class TRRMSADataset(Dataset):
 
         sliced_msa = [seq for seq in sliced_msa if (list(set(seq)) != [self.tokenizer.alphabet.index('-')])]
         msa_num_seqs = len(sliced_msa)
+        # print(sliced_msa[0])
 
         # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
         # 'MaxHamming' selection strategy
         if msa_num_seqs < self.n_sequences:
             pad_array = np.full(shape=(self.n_sequences, seq_len), fill_value=self.tokenizer.pad_id)
             pad_array[:msa_num_seqs] = sliced_msa
+            output = pad_array
         elif msa_num_seqs > self.n_sequences:
             if self.selection_type == 'random':
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
                 anchor_seq = np.expand_dims(anchor_seq, axis=0)
+                sliced_msa = np.asarray(sliced_msa)
                 output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
-            else:
+            elif self.selection_type == "MaxHamming":
                 output = [list(anchor_seq)]
                 msa_subset = np.asarray(sliced_msa[1:])
                 msa_ind = np.arange(msa_num_seqs)[1:]
                 random_ind = np.random.choice(msa_ind)
                 random_seq = sliced_msa[random_ind]
                 output.append(list(random_seq))
+                random_seq = np.expand_dims(random_seq, axis=0)
                 msa_subset = np.delete(msa_subset, (random_ind - 1), axis=0)
                 m = len(msa_ind) - 1
                 distance_matrix = np.ones((self.n_sequences - 2, m))
 
                 for i in range(self.n_sequences - 2):
-                    curr_dist = [hamming(list(random_seq), list(seq)) for seq in msa_subset]
+                    # print("seq shape:", random_seq.shape)
+                    curr_dist = cdist(random_seq, msa_subset, metric='hamming')
+                    # print("dist matrix shape ", curr_dist.shape)
+                    # cdist(chosen, msa, metric='hamming')
+                    # curr_dist = [hamming(list(random_seq), list(seq)) for seq in msa_subset]
                     curr_dist = np.expand_dims(np.array(curr_dist), axis=0)  # shape is now (1,msa_num_seqs)
                     distance_matrix[i] = curr_dist
-                    col_min = np.min(distance_matrix, axis=0)
+                    col_min = np.min(distance_matrix, axis=0) # (1,num_choices)
                     max_ind = np.argmax(col_min)
                     random_ind = max_ind
                     random_seq = msa_subset[random_ind]
                     output.append(list(random_seq))
+                    random_seq = np.expand_dims(random_seq, axis=0)
                     msa_subset = np.delete(msa_subset, random_ind, axis=0)
                     distance_matrix = np.delete(distance_matrix, random_ind, axis=1)
         else:
             output = sliced_msa
 
+        # print(output)
         output = [''.join(seq) for seq in self.alpha[output]]
         return output
 
