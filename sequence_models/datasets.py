@@ -602,7 +602,7 @@ class MSAGapDataset(Dataset):
 class TRRMSADataset(Dataset):
     """Build dataset for trRosetta data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, selection_type, n_sequences=64, max_seq_len=256, data_dir=None):  # TODO: max_seq_len=512
+    def __init__(self, selection_type, n_sequences=64, max_seq_len=512, data_dir=None):  # TODO: max_seq_len=512
         """
         Args:
             selection_type: str,
