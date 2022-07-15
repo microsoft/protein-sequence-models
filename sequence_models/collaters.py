@@ -22,6 +22,33 @@ def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
     return output
 
 
+class BGCCollater(object):
+    """A collater for BiGCARP models."""
+
+    def __init__(self, tokens, pfam_to_domain):
+        self.tokens = tokens
+        self.pfam_to_domain = pfam_to_domain
+
+    def __call__(self, domains):
+        data = tuple(zip(*domains))
+        sequences = data[0]
+        t = []
+        for sequence in sequences:
+            tok = []
+            for pfam in sequence.split(';'):
+                if pfam in self.tokens['specials']:
+                    tok.append(self.tokens['specials'][pfam])
+                    continue
+                if pfam in self.pfam_to_domain:
+                    domain = self.pfam_to_domain[pfam]
+                else:
+                    domain = 'UNK'
+                tok.append(self.tokens['domains'][domain])
+            t.append(torch.tensor(tok))
+        t = _pad(t, self.tokens['specials'][PAD])
+        return (t, )
+
+
 class TokenCollater(object):
     """A collater that pads batches of tokens."""
 

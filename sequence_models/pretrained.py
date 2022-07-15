@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from sequence_models.constants import PROTEIN_ALPHABET, PAD
+from sequence_models.constants import PROTEIN_ALPHABET, PAD, MASK
 from sequence_models.convolutional import ByteNetLM
 from sequence_models.gnn import BidirectionalStruct2SeqDecoder
-from sequence_models.collaters import SimpleCollater, StructureCollater
+from sequence_models.collaters import SimpleCollater, StructureCollater, BGCCollater
 
 
 CARP_URL = 'https://zenodo.org/record/6564798/files/'
@@ -20,12 +20,21 @@ def load_carp(model_data):
     activation = model_data['activation']
     slim = model_data['slim']
     r = model_data['r']
+    bgc = 'bigcarp' in model_data['model']
+    if not bgc:
+        n_tokens = len(PROTEIN_ALPHABET)
+        mask_idx = PROTEIN_ALPHABET.index(MASK)
+        pad_idx = PROTEIN_ALPHABET.index(PAD)
+    else:
+        n_tokens = model_data['tokens']['size']
+        mask_idx = model_data['tokens']['specials'][MASK]
+        pad_idx = model_data['tokens']['specials'][PAD]
     model = ByteNetLM(n_tokens, d_embedding, d_model, n_layers, kernel_size, r, dropout=0.0,
-                      activation=activation, causal=False, padding_idx=PROTEIN_ALPHABET.index(PAD),
+                      activation=activation, causal=False, padding_idx=mask_idx,
                       final_ln=True, slim=slim)
     sd = model_data['model_state_dict']
     model.load_state_dict(sd)
-    model = CARP(model.eval())
+    model = CARP(model.eval(), pad_idx=pad_idx)
     return model
 
 def load_gnn(model_data):
@@ -48,8 +57,13 @@ def load_model_and_alphabet(model_name):
             model_data = torch.hub.load_state_dict_from_url(url, progress=False, map_location="cpu")
     else:
         model_data = torch.load(model_name, map_location="cpu")
-    collater = SimpleCollater(PROTEIN_ALPHABET, pad=True)
-    if model_data['model'] == 'carp':
+    if 'big' in model_data['model']:
+        pfam_to_domain = model_data['pfam_to_domain']
+        tokens = model_data['tokens']
+        collater = BGCCollater(tokens, pfam_to_domain)
+    else:
+        collater = SimpleCollater(PROTEIN_ALPHABET, pad=True)
+    if 'carp' in model_data['model']:
         model = load_carp(model_data)
     elif model_data['model'] in ['mif', 'mif-st']:
         gnn = load_gnn(model_data)
@@ -66,12 +80,13 @@ def load_model_and_alphabet(model_name):
 class CARP(nn.Module):
     """Wrapper that takes care of input masking."""
 
-    def __init__(self, model: ByteNetLM):
+    def __init__(self, model: ByteNetLM, pad_idx=PROTEIN_ALPHABET.index(PAD)):
         super().__init__()
         self.model = model
+        self.pad_idx = pad_idx
 
     def forward(self, x, result='repr'):
-        padding_mask = (x != PROTEIN_ALPHABET.index(PAD))
+        padding_mask = (x != self.pad_idx)
         padding_mask = padding_mask.unsqueeze(-1)
         if result == 'repr':
             return self.model.embedder(x, input_mask=padding_mask)
@@ -98,5 +113,3 @@ class MIF(nn.Module):
         if self.cnn is not None:
             src = self.cnn(src, result='logits')
         return self.gnn(nodes, edges, connections, src, edge_mask, decoder=decoder)
-
-
