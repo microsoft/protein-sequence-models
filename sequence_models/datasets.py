@@ -602,7 +602,7 @@ class MSAGapDataset(Dataset):
 class TRRMSADataset(Dataset):
     """Build dataset for trRosetta data: MSA Absorbing Diffusion model"""
 
-    def __init__(self, selection_type, n_sequences=64, max_seq_len=256, data_dir=None):
+    def __init__(self, selection_type, n_sequences=64, max_seq_len=256, data_dir=None):  # TODO: max_seq_len=512
         """
         Args:
             selection_type: str,
@@ -775,7 +775,7 @@ class A3MMSADataset(Dataset):
                 subset_msa = parsed_msa[random_idx]
                 subset_msa = [seq[slice_start: slice_start + seq_len] for seq in subset_msa]  # TODO: do this without for loop
                 output = np.concatenate((anchor_seq, subset_msa), axis=0)
-            else:
+            elif self.selection_type == 'MaxHamming':
                 output = [anchor_seq]
                 parsed_msa = [seq[slice_start: slice_start + seq_len] for seq in parsed_msa]
                 msa_subset = parsed_msa[1:]
@@ -783,11 +783,12 @@ class A3MMSADataset(Dataset):
                 random_ind = np.random.choice(msa_ind)
                 random_seq = parsed_msa[random_ind]
                 output.append(random_seq)
-                msa_subset = np.delete(msa_subset, random_ind - 1)
+                msa_subset = np.delete(msa_subset, (random_ind - 1), axis=0)
                 m = len(msa_ind) - 1
                 distance_matrix = np.ones((self.n_sequences - 2, m))
                 for i in range(self.n_sequences - 2):
-                    curr_dist = [hamming(list(random_seq), list(seq)) for seq in msa_subset]
+                    # curr_dist = [hamming(list(random_seq), list(seq)) for seq in msa_subset]
+                    curr_dist = cdist(random_seq, msa_subset, metric='hamming')
                     curr_dist = np.expand_dims(np.array(curr_dist), axis=0)  # shape is now (1,msa_num_seqs)
                     distance_matrix[i] = curr_dist
                     col_min = np.min(distance_matrix, axis=0)
