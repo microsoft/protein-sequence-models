@@ -27,6 +27,10 @@ Available models are
 - `carp_640M`
 - `mif`
 - `mifst`
+- `bigcarp_esm1bfinetune`
+- `bigcarp_esm1bfrozen`
+- `bigcarp_random`
+
 
 ### Convolutional autoencoding representations of proteins (CARP)
 
@@ -71,6 +75,24 @@ src, nodes, edges, connections, edge_mask = collater(batch)
 rep = model(src, nodes, edges, connections, edge_mask)
 ```
 
+### Biosynthetic gene cluster CARP (BiGCARP)
+
+We make available pretrained CNN Pfam domain masked language models of BGCs. All of these have a ByteNet encoder architecture and are pretrained on antiSMASH using the same masked language modeling task as in BERT and ESM-1b.
+
+BiGCARP is described in this [preprint](). Code is available [here]().
+
+
+You can also download the weights and datasets manually from [Zenodo](). 
+
+To encode a batch of sequences: 
+
+```
+bgc = [['#;PF07690;PF06609;PF00083;PF00975;PF12697;PF00550;PF14765'],
+       ['t3pks;PF07690;PF06609;PF00083;PF00975;PF12697;PF00550;PF14765;PF00698']]
+model, collater = load_model_and_alphabet('models/bigcarp_esm1bfinetune.pt')
+x = collater(bgc)[0]
+rep = model(x)
+```
 
 
 ### Sequence Datasets and Dataloaders
