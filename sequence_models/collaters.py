@@ -22,6 +22,19 @@ def _pad(tokenized: List[torch.Tensor], value: int) -> torch.Tensor:
     return output
 
 
+class TokenCollater(object):
+    """A collater that pads batches of tokens."""
+
+    def __init__(self, pad_idx):
+        self.pad_idx = pad_idx
+
+    def __call__(self, batch: List[torch.Tensor]) -> List[torch.tensor]:
+        data = tuple(zip(*batch))
+        sequences = data[0]
+        sequences = _pad(sequences, self.pad_idx)
+        return [sequences]
+
+
 class SimpleCollater(object):
     """A collater that pads and possibly reverses batches of sequences.
 
