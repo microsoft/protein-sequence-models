@@ -38,7 +38,6 @@ We make available pretrained CNN protein sequence masked language models of vari
 
 CARP is described in this [preprint](https://doi.org/10.1101/2022.05.19.492714).
 
-
 You can also download the weights manually from [Zenodo](https://doi.org/10.5281/zenodo.6368483). 
 
 To encode a batch of sequences: 
@@ -79,17 +78,16 @@ rep = model(src, nodes, edges, connections, edge_mask)
 
 We make available pretrained CNN Pfam domain masked language models of BGCs. All of these have a ByteNet encoder architecture and are pretrained on antiSMASH using the same masked language modeling task as in BERT and ESM-1b.
 
-BiGCARP is described in this [preprint](). Code is available [here]().
+BiGCARP is described in this [preprint](). Training code is available [here](https://github.com/microsoft/protein-sequence-models).
 
-
-You can also download the weights and datasets manually from [Zenodo](). 
+You can also download the weights and datasets manually from [Zenodo](https://doi.org/10.5281/zenodo.6857704). 
 
 To encode a batch of sequences: 
 
 ```
 bgc = [['#;PF07690;PF06609;PF00083;PF00975;PF12697;PF00550;PF14765'],
        ['t3pks;PF07690;PF06609;PF00083;PF00975;PF12697;PF00550;PF14765;PF00698']]
-model, collater = load_model_and_alphabet('models/bigcarp_esm1bfinetune.pt')
+model, collater = load_model_and_alphabet('bigcarp_esm1bfinetune')
 x = collater(bgc)[0]
 rep = model(x)
 ```
