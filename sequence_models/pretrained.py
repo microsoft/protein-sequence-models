@@ -9,6 +9,7 @@ from sequence_models.collaters import SimpleCollater, StructureCollater, BGCColl
 
 CARP_URL = 'https://zenodo.org/record/6564798/files/'
 MIF_URL = 'https://zenodo.org/record/6573779/files/'
+BIG_URL = 'https://zenodo.org/record/6857704/files/'
 n_tokens = len(PROTEIN_ALPHABET)
 
 
@@ -25,13 +26,18 @@ def load_carp(model_data):
         n_tokens = len(PROTEIN_ALPHABET)
         mask_idx = PROTEIN_ALPHABET.index(MASK)
         pad_idx = PROTEIN_ALPHABET.index(PAD)
+        n_frozen = None
     else:
         n_tokens = model_data['tokens']['size']
         mask_idx = model_data['tokens']['specials'][MASK]
         pad_idx = model_data['tokens']['specials'][PAD]
+        if 'frozen' in model_data['model']:
+            n_frozen = 19450
+        else:
+            n_frozen = None
     model = ByteNetLM(n_tokens, d_embedding, d_model, n_layers, kernel_size, r, dropout=0.0,
                       activation=activation, causal=False, padding_idx=mask_idx,
-                      final_ln=True, slim=slim)
+                      final_ln=True, slim=slim, n_frozen_embs=n_frozen)
     sd = model_data['model_state_dict']
     model.load_state_dict(sd)
     model = CARP(model.eval(), pad_idx=pad_idx)
@@ -49,12 +55,13 @@ def load_gnn(model_data):
 
 def load_model_and_alphabet(model_name):
     if not model_name.endswith(".pt"):  # treat as filepath
-        if 'carp' in model_name:
+        if 'big' in model_name:
+            url = BIG_URL + '%s.pt?download=1' %model_name
+        elif 'carp' in model_name:
             url = CARP_URL + '%s.pt?download=1' %model_name
-            model_data = torch.hub.load_state_dict_from_url(url, progress=False, map_location="cpu")
         elif 'mif' in model_name:
             url = MIF_URL + '%s.pt?download=1' %model_name
-            model_data = torch.hub.load_state_dict_from_url(url, progress=False, map_location="cpu")
+        model_data = torch.hub.load_state_dict_from_url(url, progress=False, map_location="cpu")
     else:
         model_data = torch.load(model_name, map_location="cpu")
     if 'big' in model_data['model']:
