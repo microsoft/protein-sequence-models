@@ -71,9 +71,11 @@ class ApproxBatchSampler(BatchSampler):
         length = 0
         ell_sq = 0
         for idx in self.sampler:
-            this_length = self.sample_lengths[idx]
+            this_length = self.sample_lengths[idx] * 64
             linear = (len(batch) + 1) * max(length, this_length)
+            print("linear:", linear)
             quadratic = (len(batch) + 1) * max(ell_sq, this_length ** 2)
+            print("quadratic:", quadratic)
             if linear <= self.max_tokens and quadratic < self.max_square_tokens:
                 batch.append(idx)
                 length = max(length, this_length)
