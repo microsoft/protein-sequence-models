@@ -136,14 +136,13 @@ class VAELoss(nn.Module):
 class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
     """Masked cross-entropy loss for MSAs.
 
-    Evaluates the cross-entropy loss at specified locations in a sequence.
+    Evaluates the cross-entropy loss at specified locations in an MSA.
 
     Shape:
         Inputs:
             - pred: (BS, N, L, n_tokens)
             - tgt: (BS, N, L): label, with uncorrupted tokens
             - mask: (BS, N, L) boolean
-            - weight: (C, ): class weights for nn.CrossEntropyLoss
     """
 
     def __init__(self, ignore_index):
@@ -159,9 +158,9 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
 
         # Create re-weighting array
         num_masked_tokens_msa = mask.sum(axis=(1, 2))  # D-t+1 masked tokens per MSA in each batch
-        num_masked_tokens_msa = num_masked_tokens_msa.cpu().numpy().squeeze()
+        num_masked_tokens_msa = torch.squeeze(num_masked_tokens_msa)
         val_batch = 1 / num_masked_tokens_msa
-        rwt = np.repeat(val_batch, num_masked_tokens_msa)
+        rwt = val_batch.repeat_interleave(num_masked_tokens_msa)
 
         # Select corrupted indices
         n = mask.sum()
@@ -170,7 +169,6 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
 
         # Call loss function and re-weight the term
         loss = super().forward(p, t)
-        rwt = torch.tensor(rwt, dtype=torch.float64)
-        rwt = rwt.to(loss.device)
-        rwt_loss = torch.dot(rwt, loss.to(torch.float64))
+        rwt = rwt.type(loss.dtype)
+        rwt_loss = torch.dot(rwt, loss)
         return rwt_loss

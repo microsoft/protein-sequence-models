@@ -6,6 +6,17 @@ from sequence_models.constants import PROTEIN_ALPHABET, PAD, MASK
 
 
 class ESM1b(nn.Module):
+    """
+    Args:
+        d_model: int,
+            embedding dimension of model
+        d_hidden: int,
+            embedding dimension of feed forward network
+       n_layers: int,
+           number of layers
+       n_heads: int,
+           number of attention heads
+   """
 
     def __init__(self, d_model, d_hidden, n_layers, n_heads, n_tokens=len(PROTEIN_ALPHABET),
                  padding_idx=PROTEIN_ALPHABET.index(PAD), mask_idx=PROTEIN_ALPHABET.index(MASK),
@@ -71,6 +82,20 @@ class ESM1b(nn.Module):
 
 
 class MSATransformer(nn.Module):
+    """
+    Based on implementation described by Rao et al. in "MSA Transformer"
+    https://doi.org/10.1101/2021.02.12.430858
+
+    Args:
+        d_model: int,
+            embedding dimension of model
+        d_hidden: int,
+            embedding dimension of feed forward network
+       n_layers: int,
+           number of layers
+       n_heads: int,
+           number of attention heads
+   """
 
     def __init__(self, d_model, d_hidden, n_layers, n_heads, n_tokens=len(PROTEIN_ALPHABET),
                  padding_idx=PROTEIN_ALPHABET.index(PAD), mask_idx=PROTEIN_ALPHABET.index(MASK),
@@ -103,8 +128,6 @@ class MSATransformer(nn.Module):
         assert tokens.ndim == 3
         batch_size, num_alignments, seqlen = tokens.size()
         padding_mask = tokens.eq(self.padding_idx)  # B, R, C
-        # if not padding_mask.any():
-        #     padding_mask = None
 
         x = self.embed_tokens(tokens)
         x = x + self.embed_positions(tokens.view(batch_size * num_alignments, seqlen)).view(x.size())
