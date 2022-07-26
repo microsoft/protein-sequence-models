@@ -1,7 +1,8 @@
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
-
-from esm.modules import TransformerLayer, LearnedPositionalEmbedding, RobertaLMHead, ESM1bLayerNorm, AxialTransformerLayer
+from esm.modules import TransformerLayer, LearnedPositionalEmbedding, RobertaLMHead, ESM1bLayerNorm, \
+    AxialTransformerLayer
 from sequence_models.constants import PROTEIN_ALPHABET, PAD, MASK
 
 
@@ -97,7 +98,7 @@ class MSATransformer(nn.Module):
            number of attention heads
    """
 
-    def __init__(self, d_model, d_hidden, n_layers, n_heads, n_tokens=len(PROTEIN_ALPHABET),
+    def __init__(self, d_model, d_hidden, n_layers, n_heads, use_ckpt=False, n_tokens=len(PROTEIN_ALPHABET),
                  padding_idx=PROTEIN_ALPHABET.index(PAD), mask_idx=PROTEIN_ALPHABET.index(MASK),
                  max_positions=1024):
         super(MSATransformer, self).__init__()
@@ -124,6 +125,8 @@ class MSATransformer(nn.Module):
             weight=self.embed_tokens.weight
         )
 
+        self.use_ckpt = use_ckpt
+
     def forward(self, tokens):
         assert tokens.ndim == 3
         batch_size, num_alignments, seqlen = tokens.size()
@@ -139,7 +142,7 @@ class MSATransformer(nn.Module):
         x = x.permute(1, 2, 0, 3)
 
         for layer_idx, layer in enumerate(self.layers):
-            x = layer(x, self_attn_padding_mask=padding_mask, need_head_weights=False)
+            x = checkpoint(layer, x, None, padding_mask, False)
 
         x = self.emb_layer_norm_after(x)
         x = x.permute(2, 0, 1, 3)  # R x C x B x D -> B x R x C x D

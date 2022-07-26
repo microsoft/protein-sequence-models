@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import os
-import wget
+# import wget
 import tarfile
 import string
 
@@ -290,6 +290,7 @@ def tf_to_pytorch_weights(model_params, model_id):
     tf_fpath = tr_src_dir + 'model2019_07/'
     if len(os.listdir(tr_src_dir)) == 0:
         print('grabbing weights from source...')
+        import wget
         wget.download('https://files.ipd.uw.edu/pub/trRosetta/model2019_07.tar.bz2', out=zip_fpath)
         model_file = tarfile.open(zip_fpath, mode='r:bz2')
         model_file.extractall(tr_src_dir)
