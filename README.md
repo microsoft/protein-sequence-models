@@ -23,6 +23,7 @@ model, collater = load_model_and_alphabet('carp_640M')
 ```
 
 Available models are
+
 - `carp_600k`
 - `carp_38M`
 - `carp_76M`
@@ -48,6 +49,12 @@ To encode a batch of sequences:
 seqs = [['MDREQ'], ['MGTRRLLP']]
 x = collater(seqs)[0]  # (n, max_len)
 rep = model(x)  # (n, max_len, d_model)
+```
+
+CARP also supports computing representations from arbitrary layers and the final logits.
+
+```
+rep = model(x, repr_layers=[0, 2, 32], logits=True)
 ```
 
 ### Compute embeddings in bulk from FASTA
