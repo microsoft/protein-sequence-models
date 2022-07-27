@@ -92,15 +92,26 @@ class CARP(nn.Module):
         self.model = model
         self.pad_idx = pad_idx
 
-    def forward(self, x, result='repr'):
+    def forward(self, x, repr_layers=[-1], logits=False):
         padding_mask = (x != self.pad_idx)
         padding_mask = padding_mask.unsqueeze(-1)
-        if result == 'repr':
-            return self.model.embedder(x, input_mask=padding_mask)
-        elif result == 'logits':
-            return self.model(x, input_mask=padding_mask)
-        else:
-            raise ValueError("Result must be either 'repr' or 'logits'")
+        if len(repr_layers) == 1 and repr_layers[0] == -1:
+            repr_layers = [len(self.model.embedder.layers)]
+        result = {}
+        if len(repr_layers) > 0:
+            result['representations'] = {}
+        x = self.model.embedder._embed(x)
+        if 0 in repr_layers:
+            result[0] = x
+        i = 1
+        for layer in self.model.embedder.layers:
+            x = layer(x, input_mask=padding_mask)
+            if i in repr_layers:
+                result['representations'][i] = x
+            i += 1
+        if logits:
+            result['logits'] = self.model.decoder(self.model.last_norm(x))
+        return result
 
 class MIF(nn.Module):
     """Wrapper that takes care of input masking."""
