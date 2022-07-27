@@ -102,7 +102,7 @@ rep = model(src, nodes, edges, connections, edge_mask)
 
 We make available pretrained CNN Pfam domain masked language models of BGCs. All of these have a ByteNet encoder architecture and are pretrained on antiSMASH using the same masked language modeling task as in BERT and ESM-1b.
 
-BiGCARP is described in this [preprint](). Training code is available [here](https://github.com/microsoft/protein-sequence-models).
+BiGCARP is described in this [preprint](https://doi.org/10.1101/2022.07.22.500861). Training code is available [here](https://github.com/microsoft/protein-sequence-models).
 
 You can also download the weights and datasets manually from [Zenodo](https://doi.org/10.5281/zenodo.6857704). 
 
