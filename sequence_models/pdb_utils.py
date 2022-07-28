@@ -1,3 +1,4 @@
+import gzip
 import numpy as np
 import scipy
 from scipy.spatial.distance import squareform, pdist
@@ -40,7 +41,8 @@ def parse_PDB(x, atoms=["N", "CA", "C"], chain=None):
     output: (length, atoms, coords=(x,y,z)), sequence
     """
     xyz, seq, min_resn, max_resn = {}, {}, np.inf, -np.inf
-    for line in open(x, "rb"):
+    open_func = gzip.open if x.endswith('.gz') else open
+    for line in open_func(x, "rb"):
         line = line.decode("utf-8", "ignore").rstrip()
 
         if line[:6] == "HETATM" and line[17 : 17 + 3] == "MSE":
