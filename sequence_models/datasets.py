@@ -672,7 +672,8 @@ class TRRMSADataset(Dataset):
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
                 anchor_seq = np.expand_dims(anchor_seq, axis=0)
                 output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
-
+            # elif self.selection_type == 'non-random':
+            #     output = sliced_msa[:64]
             elif self.selection_type == "MaxHamming":
                 output = [list(anchor_seq)]
                 msa_subset = sliced_msa[1:]
@@ -748,6 +749,11 @@ class A3MMSADataset(Dataset):
 
         aligned_msa = [[char for char in seq if (char.isupper() or char == '-') and not char == '.'] for seq in parsed_msa]
         aligned_msa = [''.join(seq) for seq in aligned_msa]
+
+        # with open('/home/t-nthakkar/msa_' + str(idx) + '.txt', 'a') as f:
+        #     for seq in aligned_msa:
+        #         f.write(seq)
+        #         f.write('\n')
 
         tokenized_msa = [self.tokenizer.tokenize(seq) for seq in aligned_msa]
         tokenized_msa = np.array([l.tolist() for l in tokenized_msa])

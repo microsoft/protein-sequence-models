@@ -135,9 +135,7 @@ class VAELoss(nn.Module):
 
 class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
     """Masked cross-entropy loss for MSAs.
-
     Evaluates the cross-entropy loss at specified locations in an MSA.
-
     Shape:
         Inputs:
             - pred: (BS, N, L, n_tokens)
@@ -148,27 +146,73 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
     def __init__(self, ignore_index):
         super().__init__(ignore_index=ignore_index, reduction='none')
 
-    def forward(self, pred, tgt, mask):
+    def forward(self, pred, tgt, mask, nonpad_mask):
         # Make sure we have that empty last dimension
         if len(mask.shape) == len(pred.shape) - 1:
             mask = mask.unsqueeze(-1)
+            nonpad_mask = nonpad_mask.unsqueeze(-1)
 
         # Make sure mask is boolean
         mask = mask.bool()
+        nonpad_mask = nonpad_mask.bool()
+
+        batch_size = pred.shape[0]
+        # print(batch_size)
 
         # Create re-weighting array
-        num_masked_tokens_msa = mask.sum(axis=(1, 2))  # D-t+1 masked tokens per MSA in each batch
-        num_masked_tokens_msa = torch.squeeze(num_masked_tokens_msa)
-        val_batch = 1 / num_masked_tokens_msa
-        rwt = val_batch.repeat_interleave(num_masked_tokens_msa)
+        num_masked_tokens = mask.sum(axis=(1, 2))  # D-t+1 masked tokens per MSA in each batch
+        num_nonpad_tokens = nonpad_mask.sum(axis=(1, 2))
 
-        # Select corrupted indices
         n = mask.sum()
         p = torch.masked_select(pred, mask).view(n, -1)
         t = torch.masked_select(tgt, mask.squeeze())
 
-        # Call loss function and re-weight the term
+        num_masked_tokens_msa = torch.squeeze(num_masked_tokens)
+        val_batch = 1 / num_masked_tokens_msa
+        rwt = val_batch.repeat_interleave(num_masked_tokens_msa)
+
+        num_nonpad_tokens_msa = torch.squeeze(num_nonpad_tokens)
+        d_term = num_nonpad_tokens_msa.repeat_interleave(num_masked_tokens_msa)
+
         loss = super().forward(p, t)
         rwt = rwt.type(loss.dtype)
-        rwt_loss = torch.dot(rwt, loss)
-        return rwt_loss
+
+        rwt_loss = (d_term * rwt * loss).sum()
+        total_loss = loss.sum()
+
+        # num_nonpad_tokens_msa = num_nonpad_tokens[i]
+        # num_nonpad_tokens_msa = num_nonpad_tokens_msa.expand(len(loss)).type(loss.dtype)
+
+        # for i in range(batch_size):
+        #     # print(batch_size)
+        #     # # Select corrupted indices
+        #     # n = mask[i].sum()
+        #     # p = torch.masked_select(pred[i], mask[i]).view(n, -1)
+        #     # t = torch.masked_select(tgt[i], mask[i].squeeze())
+        #     #
+        #     # num_masked_tokens_msa = torch.squeeze(num_masked_tokens[i])
+        #     # val_batch = 1 / num_masked_tokens_msa
+        #     # rwt = val_batch.repeat_interleave(num_masked_tokens_msa)
+        #     #
+        #     # # Call loss function and re-weight the term
+        #     # loss = super().forward(p, t)
+        #     # rwt = rwt.type(loss.dtype)
+        #     #
+        #     # # rwt_loss = torch.dot(rwt, loss) *
+        #     # num_nonpad_tokens_msa = num_nonpad_tokens[i]
+        #     # num_nonpad_tokens_msa = num_nonpad_tokens_msa.expand(len(loss)).type(loss.dtype)
+        #     # # num_nonpad_tokens_msa = num_nonpad_tokens_msa.type(loss.dtype)
+        #     # # print(loss.shape)
+        #     # # print(num_nonpad_tokens_msa.shape)
+        #     # # print(rwt.shape)
+        #     #
+        #     # # print(num_nonpad_tokens_msa * rwt * loss)
+        #     #
+        #     # ce_loss += (num_nonpad_tokens_msa * rwt * loss).sum()
+        #     # total_loss += loss.sum()
+
+        # print(rwt_loss)
+        # print(ce_loss.sum())
+        # unwt_loss = total_loss / mask.sum()
+
+        return rwt_loss, total_loss
