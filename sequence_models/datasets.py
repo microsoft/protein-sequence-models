@@ -672,8 +672,8 @@ class TRRMSADataset(Dataset):
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
                 anchor_seq = np.expand_dims(anchor_seq, axis=0)
                 output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
-            # elif self.selection_type == 'non-random':
-            #     output = sliced_msa[:64]
+            elif self.selection_type == 'non-random':
+                output = sliced_msa[:64]
             elif self.selection_type == "MaxHamming":
                 output = [list(anchor_seq)]
                 msa_subset = sliced_msa[1:]
@@ -745,7 +745,13 @@ class A3MMSADataset(Dataset):
 
     def __getitem__(self, idx):  # TODO: add error checking?
         filename = self.filenames[idx]
-        parsed_msa = parse_fasta(self.data_dir + filename + '/a3m/uniclust30.a3m')
+        if path.exists(self.data_dir + filename + '/a3m/uniclust30.a3m'):
+            parsed_msa = parse_fasta(self.data_dir + filename + '/a3m/uniclust30.a3m')
+        elif path.exists(self.data_dir + filename + '/a3m/bfd_uniclust_hits.a3m'):
+            parsed_msa = parse_fasta(self.data_dir + filename + '/a3m/bfd_uniclust_hits.a3m')
+        else:
+            print(filename)
+            raise ValueError("file does not exist")
 
         aligned_msa = [[char for char in seq if (char.isupper() or char == '-') and not char == '.'] for seq in parsed_msa]
         aligned_msa = [''.join(seq) for seq in aligned_msa]
