@@ -129,5 +129,5 @@ class MIF(nn.Module):
         else:
             raise ValueError("Result must be either 'repr' or 'logits'")
         if self.cnn is not None:
-            src = self.cnn(src, result='logits')
+            src = self.cnn(src, repr_layers=[], logits=True)['logits']
         return self.gnn(nodes, edges, connections, src, edge_mask, decoder=decoder)
