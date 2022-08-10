@@ -66,16 +66,15 @@ $ python scripts/extract.py carp_640M examples/some_proteins.fasta \
     examples/results/some_proteins_emb_carp_640M/ \
     --repr_layers 0 32 33 logits --include mean per_tok
 ```
-Directory `some_proteins_emb_carp_640M/` now contains one `.pt` file per extracted embedding; use `torch.load()` to load them. `scripts/extract.py` has flags that determine what's included in the .pt file:
+Directory `examples/results/some_proteins_emb_carp_640M/` now contains one `.pt` file per extracted embedding; use `torch.load()` to load them. `scripts/extract.py` has flags that determine what .pt files are included:
 
 `--repr-layers` (default: final only) selects which layers to include embeddings from. `0` is the input embedding. `logits` is the per-token logits.
 
 `--include` specifies what embeddings to save. You can use the following:
 
 - `per_tok` includes the full sequence, with an embedding per amino acid (seq_len x hidden_dim).
-- `mean` includes the embeddings averaged over the full sequence, per layer.
-
-`logits` are always saved as `per_tok`. 
+- `mean` includes the embeddings averaged over the full sequence, per layer (only valid for representations).
+- `logp` computes the average log probability per sequence and stores it in a csv (only valid for logits).
 
 `scripts/extract.py` also has `--batchsize` and `--device` flags. For example, to use GPU 2 on a multi-GPU machine, pass `--device cuda:2`. The default is to use a batchsize of 1 and `cpu` if cuda is not detected or `cuda:0` if cuda is detected. 
 
@@ -102,8 +101,40 @@ batch = [[wt, torch.tensor(dist, dtype=torch.float),
           torch.tensor(omega, dtype=torch.float),
           torch.tensor(theta, dtype=torch.float), torch.tensor(phi, dtype=torch.float)]]
 src, nodes, edges, connections, edge_mask = collater(batch)
-rep = model(src, nodes, edges, connections, edge_mask)
+# can use result='repr' or result='logits'. Default is 'repr'.
+rep = model(src, nodes, edges, connections, edge_mask)  
 ```
+
+### Compute embeddings in bulk from csv
+
+We provide a script that efficiently extracts embeddings in bulk from a csv file. A cuda device is optional and will be auto-detected. The following command extracts the final-layer embedding for a FASTA file from the `mifst` model:
+
+```
+$ python scripts/extract_mif.py mifst examples/gb1s.csv \
+    examples/ \
+    examples/results/some_proteins_mifst/ \
+    repr --include mean per_tok
+```
+Directory `examples/results/some_proteins_mifst/` now contains one `.pt` file per extracted embedding; use `torch.load()` to load them. `scripts/extract_mif.py` has flags that determine what .pt files are included:
+
+The syntax is:
+```
+$ python script/extract_mif.py <model> <csv_fpath> <pdb_dir> <out_dir> <result> --include <pooling options>
+```
+
+The input csv should have columns for `name`, `sequence`, and `pdb`. The script looks in `pdb_dir` for the filenames in the `pdb` column. 
+
+The options for `result` are `repr` or `logits`.
+
+`--include` specifies what embeddings to save. You can use the following:
+
+- `per_tok` includes the full sequence, with an embedding per amino acid (seq_len x hidden_dim).
+- `mean` includes the embeddings averaged over the full sequence, per layer (only valid for representations).
+- `logp` computes the average log probability per sequence and stores it in a csv (only valid for logits).
+
+
+`scripts/extract.py` also has a `--device` flags. For example, to use GPU 2 on a multi-GPU machine, pass `--device cuda:2`. The default is to use `cpu` if cuda is not detected or `cuda:0` if cuda is detected. 
+
 
 ## Biosynthetic gene cluster CARP (BiGCARP)
 
