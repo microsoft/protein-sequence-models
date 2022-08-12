@@ -59,10 +59,10 @@ with tqdm(total=n_total) as pbar:
             for layer, rep in results['representations'].items():
                 for r, ell, name in zip(rep, bl, bn):
                     r = r[:ell]
-                    if 'mean' in args.pool:
+                    if 'mean' in args.include:
                         torch.save(r.mean(dim=0).detach().cpu(),
                                    args.out_dir + '_'.join([name, args.model, str(layer), 'mean']) + '.pt')
-                    if 'per_tok' in args.pool:
+                    if 'per_tok' in args.include:
                         torch.save(r.detach().cpu(),
                                    args.out_dir + '_'.join([name, args.model, str(layer), 'per_tok']) + '.pt')
         if logits:
