@@ -730,6 +730,8 @@ class A3MMSADataset(Dataset):
         all_files = os.listdir(self.data_dir)
         if 'openfold_lengths.npz' in all_files:
             all_files.remove('openfold_lengths.npz')
+        if 'trrosetta_test_lengths.npz' in all_files:
+            all_files.remove('trrosetta_test_lengths.npz')
         all_files = sorted(all_files)
         self.filenames = all_files  # IDs of samples to include
 
@@ -750,8 +752,9 @@ class A3MMSADataset(Dataset):
         elif path.exists(self.data_dir + filename + '/a3m/bfd_uniclust_hits.a3m'):
             parsed_msa = parse_fasta(self.data_dir + filename + '/a3m/bfd_uniclust_hits.a3m')
         else:
-            print(filename)
-            raise ValueError("file does not exist")
+            parsed_msa = parse_fasta(self.data_dir + filename)
+            # print(filename)
+            # raise ValueError("file does not exist")
 
         aligned_msa = [[char for char in seq if (char.isupper() or char == '-') and not char == '.'] for seq in parsed_msa]
         aligned_msa = [''.join(seq) for seq in aligned_msa]
