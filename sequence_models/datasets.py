@@ -20,6 +20,18 @@ from sequence_models.constants import trR_ALPHABET, DIST_BINS, PHI_BINS, THETA_B
 from sequence_models.gnn import bins_to_vals
 from sequence_models.pdb_utils import process_coords
 
+class ListDataset(Dataset):
+
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
+
+    def __getitem__(self, item):
+        return (self.data[item], )
+
+    def __len__(self):
+        return len(self.data)
+
 
 class LMDBDataset(Dataset):
     """Creates a dataset from an lmdb file.
