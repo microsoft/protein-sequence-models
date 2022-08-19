@@ -73,7 +73,6 @@ with tqdm(total=n_total) as pbar:
                     torch.save(r.detach().cpu(), args.out_dir + '_'.join([name, args.model, 'logits']) + '.pt')
                 if 'logp' in args.include:
                     r = r.log_softmax(dim=-1)[:ell]
-                    print(src.shape, r.shape)
                     logps[i] = r[torch.arange(len(src)), src].mean().detach().cpu().numpy()
         pbar.update(len(bs))
     if 'logp' in args.include:
