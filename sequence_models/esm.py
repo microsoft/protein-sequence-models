@@ -1,4 +1,6 @@
 import torch.nn as nn
+import torch
+import numpy as np
 from torch.utils.checkpoint import checkpoint
 
 from esm.modules import TransformerLayer, LearnedPositionalEmbedding, RobertaLMHead, ESM1bLayerNorm, \
@@ -82,6 +84,31 @@ class ESM1b(nn.Module):
         return x
 
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model=8, length=500):
+        super().__init__()
+        self.d_model = d_model
+        self.length = length
+
+    def forward(self, x):
+        """
+        :param d_model: dimension of the model
+        :param length: length of positions
+        :return: length*d_model position matrix
+        """
+        if self.d_model % 2 != 0:
+            raise ValueError("Cannot use sin/cos positional encoding with "
+                             "odd dim (got dim={:d})".format(self.d_model))
+        pe = torch.zeros(self.length, self.d_model)
+        position = torch.arange(0, self.length).unsqueeze(1)
+        div_term = torch.exp((torch.arange(0, self.d_model, 2, dtype=torch.float) *
+                              -(torch.log(10000.0) / self.d_model)))
+        pe[:, 0::2] = torch.sin(position.float() * div_term)
+        pe[:, 1::2] = torch.cos(position.float() * div_term)
+
+        return pe[x].to(x.device)
+
+
 class MSATransformer(nn.Module):
     """
     Based on implementation described by Rao et al. in "MSA Transformer"
@@ -98,9 +125,10 @@ class MSATransformer(nn.Module):
            number of attention heads
    """
 
-    def __init__(self, d_model, d_hidden, n_layers, n_heads, use_ckpt=False, n_tokens=len(PROTEIN_ALPHABET),
+    def __init__(self, d_model, d_hidden, n_layers, n_heads, timesteps=500, use_ckpt=False,
+                 n_tokens=len(PROTEIN_ALPHABET),
                  padding_idx=PROTEIN_ALPHABET.index(PAD), mask_idx=PROTEIN_ALPHABET.index(MASK),
-                 max_positions=1024):
+                 max_positions=1024):  # TODO: read max timesteps in from config
         super(MSATransformer, self).__init__()
         self.embed_tokens = nn.Embedding(
             n_tokens, d_model, padding_idx=mask_idx
@@ -126,14 +154,20 @@ class MSATransformer(nn.Module):
         )
 
         self.use_ckpt = use_ckpt
+        self.time_encoding = PositionalEncoding(d_model, timesteps)
 
-    def forward(self, tokens):
+    def forward(self, tokens, y=None, use_time=False):
         assert tokens.ndim == 3
         batch_size, num_alignments, seqlen = tokens.size()
         padding_mask = tokens.eq(self.padding_idx)  # B, R, C
 
         x = self.embed_tokens(tokens)
         x = x + self.embed_positions(tokens.view(batch_size * num_alignments, seqlen)).view(x.size())
+        if use_time:
+            val = self.time_encoding(y)
+            val = val.expand(x.shape[1], val.shape[0], val.shape[1])
+            val = val.reshape(x.shape[0], x.shape[1], x.shape[2])
+            x = x + val
 
         x = self.emb_layer_norm_before(x)
         x = x * (1 - padding_mask.unsqueeze(-1).type_as(x))

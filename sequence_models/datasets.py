@@ -873,10 +873,27 @@ class A2MZeroShotDataset(Dataset):
 
     def __getitem__(self, idx):
         filename = self.filenames[idx]
-        print(filename)
         parsed_msa = parse_fasta(self.data_dir + filename)
 
-        aligned_msa = [[char for char in seq if (char.isupper() or char == '-') and not char == '.'] for seq in parsed_msa]
+        query_dict = {}
+        aligned_msa = []
+        for seq in parsed_msa:
+            seq_aligned = []
+            if seq == parsed_msa[0]:  # only care about query seq for the zero shot dataset
+                aligned_idx = 0
+                for i in range(len(seq)):
+                    char = seq[i]
+                    if char.isupper() or char == '-':
+                        seq_aligned.append(char)
+                        query_dict[i] = aligned_idx
+                        aligned_idx += 1
+                aligned_msa.append(seq_aligned)
+            else:
+                for char in seq:
+                    if char.isupper() or char == '-':
+                        seq_aligned.append(char)
+                aligned_msa.append(seq_aligned)
+
         aligned_msa = [''.join(seq) for seq in aligned_msa]
 
         tokenized_msa = [self.tokenizer.tokenize(seq) for seq in aligned_msa]
@@ -885,39 +902,27 @@ class A2MZeroShotDataset(Dataset):
         msa_seq_len = len(tokenized_msa[0])
         seq_len = msa_seq_len
 
-        # if msa_seq_len > self.max_seq_len:
-        #     slice_start = np.random.choice(msa_seq_len - self.max_seq_len + 1)
-        #     seq_len = self.max_seq_len
-        # else:
-        #     slice_start = 0
-        #     seq_len = msa_seq_len
-        #
-        # sliced_msa = tokenized_msa[:, slice_start: slice_start + self.max_seq_len]
-        sliced_msa = tokenized_msa
-        anchor_seq = sliced_msa[0]  # This is the query sequence in MSA
+        anchor_seq = tokenized_msa[0]  # This is the query sequence in MSA
 
-        # gap_str = '-' * msa_seq_len
-        # parsed_msa = [seq.upper() for seq in parsed_msa if seq != gap_str]
-
-        sliced_msa = [seq for seq in sliced_msa if (list(set(seq)) != [self.tokenizer.alphabet.index('-')])]
-        msa_num_seqs = len(sliced_msa)
+        tokenized_msa = [seq for seq in tokenized_msa if (list(set(seq)) != [self.tokenizer.alphabet.index('-')])]
+        msa_num_seqs = len(tokenized_msa)
 
         # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
         # 'MaxHamming' selection strategy
         if msa_num_seqs < self.n_sequences:
             output = np.full(shape=(self.n_sequences, seq_len), fill_value=self.tokenizer.pad_id)
-            output[:msa_num_seqs] = sliced_msa
+            output[:msa_num_seqs] = tokenized_msa
         elif msa_num_seqs > self.n_sequences:
             if self.selection_type == 'random':
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
                 anchor_seq = np.expand_dims(anchor_seq, axis=0)
-                output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
+                output = np.concatenate((anchor_seq, tokenized_msa[random_idx]), axis=0)
             elif self.selection_type == "MaxHamming":
                 output = [list(anchor_seq)]
-                msa_subset = sliced_msa[1:]
+                msa_subset = tokenized_msa[1:]
                 msa_ind = np.arange(msa_num_seqs)[1:]
                 random_ind = np.random.choice(msa_ind)
-                random_seq = sliced_msa[random_ind]
+                random_seq = tokenized_msa[random_ind]
                 output.append(list(random_seq))
                 random_seq = np.expand_dims(random_seq, axis=0)
                 msa_subset = np.delete(msa_subset, (random_ind - 1), axis=0)
@@ -937,7 +942,6 @@ class A2MZeroShotDataset(Dataset):
                     msa_subset = np.delete(msa_subset, random_ind, axis=0)
                     distance_matrix = np.delete(distance_matrix, random_ind, axis=1)
         else:
-            output = sliced_msa
+            output = tokenized_msa
 
-        output = [''.join(seq) for seq in self.alpha[output]]
-        return output
+        return output, query_dict

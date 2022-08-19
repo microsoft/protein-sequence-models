@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from sequence_models.utils import Tokenizer
+from sequence_models.utils import Tokenizer, matrixMul
 from sequence_models.constants import PAD, GAP, START, STOP, MASK
 from sequence_models.constants import ALL_AAS
 from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
@@ -46,7 +46,7 @@ class BGCCollater(object):
                 tok.append(self.tokens['domains'][domain])
             t.append(torch.tensor(tok))
         t = _pad(t, self.tokens['specials'][PAD])
-        return (t, )
+        return (t,)
 
 
 class TokenCollater(object):
@@ -230,7 +230,7 @@ class MLMCollater(SimpleCollater):
 
     def __init__(self, alphabet: str, pad=False, backwards=False, pad_token=PAD, mut_alphabet=ALL_AAS):
         super().__init__(alphabet, pad=pad, backwards=backwards, pad_token=pad_token)
-        self.mut_alphabet=mut_alphabet
+        self.mut_alphabet = mut_alphabet
 
     def _prep(self, sequences):
         tgt = list(sequences[:])
@@ -358,7 +358,7 @@ class StructureOutputCollater(object):
         phis = self._pad(phis, ells)
         return seqs, dists, omegas, thetas, phis, masks
 
-    
+
 class TAPE2trRosettaCollater(SimpleCollater):
     """Does trRosetta preprocessing for TAPE datasets. """
 
@@ -371,23 +371,23 @@ class TAPE2trRosettaCollater(SimpleCollater):
         if len(data) == 0:
             return data
         sequences = data[0]
-        sequences = [i.replace('X', '-') for i in sequences] # get rid of X found in secondary_stucture data
+        sequences = [i.replace('X', '-') for i in sequences]  # get rid of X found in secondary_stucture data
         lens = [len(i) for i in sequences]
         max_len = max(lens)
         prepped = self._prep(sequences)[0]
-        prepped = torch.stack([self.featurization.process(i.view(1,-1)).squeeze(0) for i in prepped])
+        prepped = torch.stack([self.featurization.process(i.view(1, -1)).squeeze(0) for i in prepped])
         y = data[1]
         tgt_mask = data[2]
         src_mask = [torch.ones(i, i).bool() for i in lens]
         src_mask = [F.pad(mask_i,
                           (0, max_len - len(mask_i), 0, max_len - len(mask_i)), value=False) for mask_i in src_mask]
         src_mask = torch.stack(src_mask, dim=0).unsqueeze(1)
-        
-        if isinstance(y[0], float): # stability or fluorescence
+
+        if isinstance(y[0], float):  # stability or fluorescence
             y = torch.tensor(y).unsqueeze(-1)
             tgt_mask = torch.ones_like(y)
 
-        elif isinstance(y[0], int): # remote homology
+        elif isinstance(y[0], int):  # remote homology
             y = torch.tensor(y).long()
             tgt_mask = torch.ones_like(y)
 
@@ -395,16 +395,16 @@ class TAPE2trRosettaCollater(SimpleCollater):
             tgt_mask = [torch.ones(i) for i in lens]
             y = _pad(y, 0).long()
             tgt_mask = _pad(tgt_mask, 0).long()
-            
+
         elif len(y[0].shape) == 2:  # contact
             max_len = max(len(i) for i in y)
             tgt_mask = [F.pad(mask_i,
-                      (0, max_len - len(mask_i), 0, max_len - len(mask_i)), value=False) for mask_i in tgt_mask]
+                              (0, max_len - len(mask_i), 0, max_len - len(mask_i)), value=False) for mask_i in tgt_mask]
             tgt_mask = torch.stack(tgt_mask, dim=0)
             y = [F.pad(yi, (0, max_len - len(yi), 0, max_len - len(yi)), value=-1) for yi in y]
             y = torch.stack(y, dim=0).long()
         return prepped.float(), y, tgt_mask, src_mask
-    
+
 
 class MSAStructureCollater(StructureOutputCollater):
     """Collater that batches msas and ell x ell structure targets.
@@ -499,8 +499,8 @@ class MSAGapCollater(object):
 
         if self.task == 'gap-prob':
             y = _pad(y, 0)
-            mask_y = [torch.ones_like(i).bool() for i in y]            
-            mask_y = _pad(mask_y, False)    
+            mask_y = [torch.ones_like(i).bool() for i in y]
+            mask_y = _pad(mask_y, False)
             if self.direction != 'bidirectional':
                 y = F.pad(y, [0, 1, 0, 0], value=0)
                 mask_y = F.pad(mask_y, [0, 1, 0, 0], value=False)
@@ -512,7 +512,6 @@ class MSAGapCollater(object):
             y = F.pad(y, d1_pad)
             mask_y = (seqs[:, 1:] != self.pad_idx).float()
             mask_y = F.pad(mask_y, d1_pad)
-
 
         return X + (y, mask_y)
 
@@ -552,7 +551,7 @@ def _pad_msa(tokenized: List, num_seq: int, max_len: int, value: int) -> torch.T
     return output
 
 
-class MSAAbsorbingCollater():
+class MSAAbsorbingARDMCollater():
     """Collater for MSA Absorbing Diffusion model.
     Based on implementation described by Hoogeboom et al. in "Autoregressive Diffusion Models"
     https://doi.org/10.48550/arXiv.2110.02037
@@ -615,3 +614,104 @@ class MSAAbsorbingCollater():
         mask = (src == self.tokenizer.mask_id)
 
         return src, tgt, mask
+
+
+def random_sample(msa, p):
+    print(p.shape)
+    sampled_msa = torch.zeros((len(msa), len(msa[0])))
+    for i in range(len(msa)):
+        for j in range(len(msa[0])):
+            aa_selected = torch.multinomial(p[i, j], 1)
+        sampled_msa[i, j] = aa_selected
+    return sampled_msa
+
+
+def sample_transition_matrix(x_0, Q, time):
+    """Sample a markov transition according to next_step = x_0 * q ^ time"""
+    p_next_step = torch.matmul(x_0, matrixMul(Q, time))  # TODO: might work or need to insert at dim=1 num seq into Q
+    next_step = random_sample(x_0, p_next_step)
+    return next_step, p_next_step
+
+
+def _diff(a, b):
+    return torch.ne(a, b).float()
+
+
+class MSAAbsorbingD3PMCollater():
+    """Collater for MSA Absorbing Diffusion model.
+    Based on implementation described by Austin et al. in "Structured Denoising Diffusion Models in Discrete State-Spaces"
+    https://doi.org/10.48550/arXiv.2107.03006
+
+    Parameters:
+        alphabet: str,
+            protein alphabet to use
+        masking_scheme: str,
+            either 'BLOSUM' or 'RANDOM'
+        pad_token: str,
+            pad_token to use to pad MSAs, default is PAD token from sequence_models.constants
+        num_seqs: int,
+            number of sequences to include in each MSA
+        num_timesteps: int,
+            mak number of timesteps for forward diffusion, default is 500
+
+    Input (list): a batch of Multiple Sequence Alignments (MSAs), each MSA contains 64 sequences
+    Output:
+        src (torch.LongTensor): corrupted input + padding
+        tgt (torch.LongTensor): input + padding
+        mask (torch.LongTensor): 1 where tgt is not padding
+    """
+
+    def __init__(self, alphabet: str, masking_scheme: str, pad_token=PAD, num_seqs=64, num_timesteps=500):
+        self.tokenizer = Tokenizer(alphabet)
+        self.pad_idx = self.tokenizer.alphabet.index(pad_token)
+        self.num_seqs = num_seqs
+        self.masking_scheme = masking_scheme
+        self.num_timesteps = num_timesteps
+
+    def __call__(self, batch_msa):
+        tokenized = [[torch.tensor(self.tokenizer.tokenize(s)) for s in seq] for seq in batch_msa]
+        max_len = max(len(msa[0]) for msa in batch_msa)
+        src = []
+        timesteps = []
+        masks = []
+
+        alphabet = self.tokenizer.tokenize([self.tokenizer.alphabet[0]])
+        all_aas = self.tokenizer.tokenize([self.tokenizer.all_aas[0]])
+        one_hot = [torch.tensor(self.tokenizer.one_hot(msa)) for msa in batch_msa]
+        # Pre pad one-hot arrays
+        pad_one_hot = torch.zeros((len(alphabet)))
+        q_x = pad_one_hot.repeat((len(batch_msa), max_len, 1))
+        if self.masking_scheme == "BLOSUM":
+            Q = self.tokenizer.q_blosum_schedule(timesteps=self.num_timesteps, end=0.4, max=8)
+        elif self.masking_scheme == "RANDOM":
+            Q = self.tokenizer.q_random_schedule(timesteps=self.num_timesteps, end=2, max=6)
+        # Q = torch.tensor(Q)
+        for i, x in enumerate(one_hot):
+            # if self.inputs_padded:  # if truncating seqs to some length first in SimpleCollater, inputs will be padded
+            #     x_pad = x.clone()
+            #     mask_pad = x_pad != self.tokenizer.pad_id
+            #     x = x[mask_pad]  # .to(torch.int64)
+
+            # Randomly generate timestep and indices to mask
+            num_seq = len(x)
+            seq_len = len(x[0])
+            t = np.random.randint(1, self.num_timesteps)  # randomly sample timestep
+            # Q = torch.tensor(q_t[t])
+            # Append timestep
+            timesteps.append(t)
+            # Calculate target
+            x_t, q_x_t = sample_transition_matrix(x, Q[t], 1)  # x = tgt, x_t = src
+            src.append(x_t)
+            q_x[i, :num_seq, :seq_len, :len(all_aas)] = q_x_t
+            # Mask from input and output
+            mask_arr = _diff(tokenized[i], x_t)
+            # index_arr = np.arange(0, max_len)  # index array [1...seq_len]
+            # mask = np.isin(index_arr, mask_arr, invert=False).reshape(index_arr.shape)
+            # mask = torch.tensor(mask, dtype=torch.bool)
+            masks.append(mask_arr)
+        # PAD out
+        src = _pad_msa(src, self.num_seqs, max_len, self.pad_idx)
+        tokenized = _pad_msa(tokenized, self.num_seqs, max_len, self.pad_idx)
+        masks = _pad_msa(masks * 1, self.num_seqs, max_len, 0)
+        return (src.to(torch.long), torch.tensor(timesteps), tokenized.to(torch.long), masks.to(torch.long), Q,
+                q_x.to(torch.double))

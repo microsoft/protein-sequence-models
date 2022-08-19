@@ -1,7 +1,11 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+from sequence_models.constants import PROTEIN_ALPHABET
+from sequence_models.utils import Tokenizer
+from torch.nn import KLDivLoss, CrossEntropyLoss
 import numpy as np
+from sequence_models.collaters import random_sample, sample_transition_matrix
 
 
 class MaskedCosineLoss(nn.Module):
@@ -157,7 +161,6 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
         nonpad_mask = nonpad_mask.bool()
 
         batch_size = pred.shape[0]
-        # print(batch_size)
 
         # Create re-weighting array
         num_masked_tokens = mask.sum(axis=(1, 2))  # D-t+1 masked tokens per MSA in each batch
@@ -180,39 +183,92 @@ class MaskedCrossEntropyLossMSA(nn.CrossEntropyLoss):
         rwt_loss = (d_term * rwt * loss).sum()
         total_loss = loss.sum()
 
-        # num_nonpad_tokens_msa = num_nonpad_tokens[i]
-        # num_nonpad_tokens_msa = num_nonpad_tokens_msa.expand(len(loss)).type(loss.dtype)
-
-        # for i in range(batch_size):
-        #     # print(batch_size)
-        #     # # Select corrupted indices
-        #     # n = mask[i].sum()
-        #     # p = torch.masked_select(pred[i], mask[i]).view(n, -1)
-        #     # t = torch.masked_select(tgt[i], mask[i].squeeze())
-        #     #
-        #     # num_masked_tokens_msa = torch.squeeze(num_masked_tokens[i])
-        #     # val_batch = 1 / num_masked_tokens_msa
-        #     # rwt = val_batch.repeat_interleave(num_masked_tokens_msa)
-        #     #
-        #     # # Call loss function and re-weight the term
-        #     # loss = super().forward(p, t)
-        #     # rwt = rwt.type(loss.dtype)
-        #     #
-        #     # # rwt_loss = torch.dot(rwt, loss) *
-        #     # num_nonpad_tokens_msa = num_nonpad_tokens[i]
-        #     # num_nonpad_tokens_msa = num_nonpad_tokens_msa.expand(len(loss)).type(loss.dtype)
-        #     # # num_nonpad_tokens_msa = num_nonpad_tokens_msa.type(loss.dtype)
-        #     # # print(loss.shape)
-        #     # # print(num_nonpad_tokens_msa.shape)
-        #     # # print(rwt.shape)
-        #     #
-        #     # # print(num_nonpad_tokens_msa * rwt * loss)
-        #     #
-        #     # ce_loss += (num_nonpad_tokens_msa * rwt * loss).sum()
-        #     # total_loss += loss.sum()
-
-        # print(rwt_loss)
-        # print(ce_loss.sum())
-        # unwt_loss = total_loss / mask.sum()
-
         return rwt_loss, total_loss
+
+
+def sample_prior_gaussian(q):
+    samples = q.shape[0]
+    num_seqs = q.shape[1]
+    seq_len = q.shape[2]
+    sample_shape = (torch.zeros(1, 1, 26)).shape
+    m = torch.distributions.uniform.Uniform(torch.tensor([0.0]), torch.tensor([1.0]))
+    prior = torch.zeros(q[:, :, :, :len(PROTEIN_ALPHABET)].shape)
+    print(q.size)
+    for i in range(samples):
+        for j in range(num_seqs):
+            for k in range(seq_len):
+                aa_prob = m.sample(sample_shape=sample_shape).squeeze()
+                aa_prob = aa_prob / aa_prob.sum()
+                # print(aa_prob)
+                # print(aa_prob.shape)
+                # print(aa_prob.sum())
+                prior[i, j, k] = aa_prob
+    return prior
+
+
+class LVBLoss(KLDivLoss):
+    def __init__(self, tmax=500, reduction='batchmean', log_target=False, _lambda=0.01):
+        self.tmax = tmax
+        self._lambda = _lambda
+        self.tokenizer = Tokenizer(PROTEIN_ALPHABET)
+        super().__init__(reduction=reduction, log_target=log_target)
+
+    def forward(self, q, pred, tgt, timestep, Q):
+        T_inf = self.tmax
+        p = torch.nn.functional.softmax(pred[:, :, :, :len(PROTEIN_ALPHABET)], dim=2)  # ignoring mask/pad
+        alphabet = self.tokenizer.tokenize([self.tokenizer.alphabet])
+        losses = []
+        prior = sample_prior_gaussian(q)  # random prior, for absorbing state
+        prior = prior.to(tgt.device)
+        for i in range(tgt.shape[0]):  # enumerate over batch
+            # print(self.tokenizer.untokenize(tgt[i]))
+            if timestep[i] == 1:
+                # CE (L_t=0)
+                # Reconstruction loss
+                reconstruction_loss = CrossEntropyLoss()
+                r_loss = reconstruction_loss(pred[i], tgt[i])
+                losses.append(r_loss)
+                print("timestep", timestep[i], "r_loss_i", r_loss)
+            elif timestep[i] >= T_inf - 1:
+                # D KL (L_T)
+                # As T approches infinity, this term goes to zero
+                # print(prior[i].shape, q[i, :, :26].shape)
+                kl_loss_i = super().forward(prior[i].log(),
+                                            q[i, :, :, len(PROTEIN_ALPHABET)])  # KLDivLoss expects input in log-space
+                losses.append(kl_loss_i)
+                # print("timestep", timestep[i], "seq_len", len(tgt[i]), "kINF_loss_i", kl_loss_i)
+            else:
+                # D KL (L_t-1) -> (q(x|x_t, x_0), p_theta)
+                prob = p[i]
+                q_true = q[i, :, :, :26]  # ignoring mask/pad
+                x_0_bar = torch.zeros((len(prob), len(prob[0])))
+                x_0_bar = random_sample(x_0_bar, prob, alphabet)  # sample x_0_bar from prediction prob
+                # print(self.tokenizer.untokenize(x_0_bar))
+                x_0_bar = torch.tensor(self.tokenizer.one_hot(x_0_bar, tokenized=True))  # one hot
+                x_0_bar = x_0_bar.to(tgt.device)
+                # Calculate q given model predictions
+                x_t, q_x_t = sample_transition_matrix(x_0_bar, Q[timestep[i]], 1, alphabet)
+                x_t = torch.tensor(self.tokenizer.one_hot(x_t, tokenized=True))  # one hot
+                x_t = x_t.to(tgt.device)
+                p_theta = []  # torch.zeros(q_true.shape)
+                for j in range(len(x_0_bar)):  # enumerate over masked tokens in sequence (dim 1xK)
+                    for k in range(len(x_0_bar[0])):
+                        # A = x_t * torch.transpose(Q_t) (shape - 1 x K)
+                        A = torch.matmul(x_t[j, k].unsqueeze(0), torch.t(Q[timestep[i]]))
+                        # print("A", A.shape, A)
+                        # B = x_0_bar * Q_t-1 (shape - 1 x K)
+                        B = torch.matmul(x_0_bar[j, k].unsqueeze(0), Q[timestep[i - 1]])
+                        # print("B", B.shape, B)
+                        q_t_jk = torch.mul(A, B)  # element wise (shape 1 x K)
+                        p_theta_jk = q_t_jk * prob[j,k]
+                        p_theta_jk = p_theta_jk / p_theta_jk.sum()  # renormalize; sum prob to 1
+                        p_theta.append(p_theta_jk.squeeze())
+                p_theta = torch.stack(p_theta)
+                p_theta = p_theta.to(tgt.device)
+                kl_loss_i = super().forward(p_theta.log(), q_true)  # KLDivLoss expects input in log-space
+                print("timestep", timestep[i], "seq_len", len(tgt[i]), "k_loss_i", kl_loss_i)
+                losses.append(kl_loss_i)
+        # TODO append loss to CSV w/ timestep for plotting #
+        losses = torch.stack(losses)
+        lvb = ((losses.sum()) / (tgt.shape[0]))  # loss per batch, norm by batchsize
+        return losses, lvb
