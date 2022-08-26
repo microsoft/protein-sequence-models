@@ -58,13 +58,14 @@ class ApproxBatchSampler(BatchSampler):
 		List of lengths of sequences in the order of the dataset
 	"""
 
-    def __init__(self, sampler, max_tokens, max_batch, sample_lengths, max_square_tokens=np.inf):
+    def __init__(self, sampler, max_tokens, max_batch, sample_lengths, max_square_tokens=np.inf, msa_depth=None):
         self.longest_token = 0
         self.max_tokens = max_tokens
         self.max_batch = max_batch
         self.sampler = sampler
         self.sample_lengths = sample_lengths
         self.max_square_tokens = max_square_tokens
+        self.msa_depth = msa_depth
 
     def __iter__(self):
         batch = []
@@ -72,7 +73,11 @@ class ApproxBatchSampler(BatchSampler):
         ell_sq = 0
         for idx in self.sampler:
             this_length = self.sample_lengths[idx]
-            linear = (len(batch) + 1) * max(length, this_length)
+            if self.msa_depth is None:
+                linear = (len(batch) + 1) * max(length, this_length)
+            else:
+                max_len = max(length, this_length)
+                linear = (len(batch) + 1) * (max_len * self.msa_depth ** 2 + max_len ** 2 * self.msa_depth)
             quadratic = (len(batch) + 1) * max(ell_sq, this_length ** 2)
             if linear <= self.max_tokens and quadratic < self.max_square_tokens:
                 batch.append(idx)

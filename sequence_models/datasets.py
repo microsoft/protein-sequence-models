@@ -7,18 +7,18 @@ import json
 import os
 from os import path
 import pickle as pkl
-from scipy.spatial.distance import squareform, pdist
+from scipy.spatial.distance import squareform, pdist, hamming, cdist
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 import pandas as pd
 
-from sequence_models.utils import Tokenizer
-from sequence_models.constants import trR_ALPHABET, DIST_BINS, PHI_BINS, THETA_BINS, OMEGA_BINS
+from sequence_models.utils import Tokenizer, parse_fasta
+from sequence_models.constants import trR_ALPHABET, DIST_BINS, PHI_BINS, THETA_BINS, OMEGA_BINS, STOP, PAD, \
+    PROTEIN_ALPHABET
 from sequence_models.gnn import bins_to_vals
 from sequence_models.pdb_utils import process_coords
-
 
 class ListDataset(Dataset):
 
@@ -88,28 +88,28 @@ class TAPEDataset(Dataset):
                  data_path: Union[str, Path],
                  data_type: str,
                  split: str,
-                 sub_type : str = 'distance',
-                 eps : float = 1e-6,
+                 sub_type: str = 'distance',
+                 eps: float = 1e-6,
                  in_memory: bool = False,
                  max_len=700):
 
         """
         data_path : path to data directory
 
-        data_type : name of downstream task, [fluorescence, stability, remote_homology, 
+        data_type : name of downstream task, [fluorescence, stability, remote_homology,
             secondary_structure, contact]
-        
+
         split : data split to load
 
-        contact_method : if data_type == contact, choose 'distance' to get 
+        contact_method : if data_type == contact, choose 'distance' to get
             distance instead of binary contact output
         """
-        
+
         self.data_type = data_type
         self.sub_type = sub_type
         self.eps = eps
         self.max_len = max_len
-        
+
         if data_type == 'fluorescence':
             if split not in ('train', 'valid', 'test'):
                 raise ValueError(f"Unrecognized split: {split}. "
@@ -117,7 +117,7 @@ class TAPEDataset(Dataset):
 
             data_file = Path(data_path + f'fluorescence_{split}.lmdb')
             self.output_label = 'log_fluorescence'
-            
+
         if data_type == 'stability':
             if split not in ('train', 'valid', 'test'):
                 raise ValueError(f"Unrecognized split: {split}. "
@@ -125,7 +125,7 @@ class TAPEDataset(Dataset):
 
             data_file = Path(data_path + f'stability_{split}.lmdb')
             self.output_label = 'stability_score'
-        
+
         if data_type == 'remote_homology':
             if split not in ('train', 'valid', 'test_fold_holdout',
                              'test_family_holdout', 'test_superfamily_holdout'):
@@ -135,7 +135,7 @@ class TAPEDataset(Dataset):
 
             data_file = Path(data_path + f'remote_homology_{split}.lmdb')
             self.output_label = 'fold_label'
-            
+
         if data_type == 'secondary_structure':
             if split not in ('train', 'valid', 'casp12', 'ts115', 'cb513'):
                 raise ValueError(f"Unrecognized split: {split}. Must be one of "
@@ -147,7 +147,7 @@ class TAPEDataset(Dataset):
                 self.output_label = 'ss8'
             else:
                 self.output_label = 'ss3'
-            
+
         if data_type == 'contact':
             if split not in ('train', 'train_unfiltered', 'valid', 'test'):
                 raise ValueError(f"Unrecognized split: {split}. Must be one of "
@@ -155,7 +155,7 @@ class TAPEDataset(Dataset):
 
             data_file = Path(data_path + f'proteinnet_{split}.lmdb')
             self.output_label = 'tertiary'
-            
+
         self.data = LMDBDataset(data_file, in_memory)
 
     def __len__(self) -> int:
@@ -165,10 +165,10 @@ class TAPEDataset(Dataset):
         item = self.data[index]
         primary = item['primary']
         mask = None
-        
+
         if self.data_type in ['fluorescence', 'stability', ]:
             output = float(item[self.output_label][0])
-        
+
         if self.data_type in ['remote_homology']:
             output = item[self.output_label]
             diff = max(len(primary) - self.max_len + 1, 1)
@@ -178,7 +178,7 @@ class TAPEDataset(Dataset):
 
         if self.data_type in ['secondary_structure']:
             # pad with -1s because of cls/sep tokens
-            output = torch.Tensor(item[self.output_label],).to(torch.int8)
+            output = torch.Tensor(item[self.output_label], ).to(torch.int8)
             diff = max(len(primary) - self.max_len + 1, 1)
             start = np.random.choice(diff)
             end = start + self.max_len
@@ -394,7 +394,7 @@ class UniRefDataset(Dataset):
             phi = phi[start:stop, start:stop]
             return consensus, dist, omega, theta, phi
         consensus = consensus[start:stop]
-        return (consensus, )
+        return (consensus,)
 
 
 class TRRDataset(Dataset):
@@ -467,11 +467,11 @@ class TRRDataset(Dataset):
 
         return s, dist, omega, theta, phi
 
-    
-    
+
 class MSAGapDataset(Dataset):
     """Build dataset for trRosetta data: gap-prob and lm/mlm"""
-    def __init__(self, data_dir, dataset, task, pdb=False, y=None, msa=None, 
+
+    def __init__(self, data_dir, dataset, task, pdb=False, y=None, msa=None,
                  random_seq=False, npz_dir=None, reweight=True, mask_endgaps=False):
         """
         Args:
@@ -513,15 +513,15 @@ class MSAGapDataset(Dataset):
         all_npzs = os.listdir(self.npz_dir)
         selected_npzs = [i for i in pdb_ids if i + '.npz' in all_npzs]
         self.filenames = selected_npzs  # ids of samples to include
-        
+
         # X options
         self.pdb = pdb
         self.task = task
         self.random_seq = random_seq
-        
+
         # special options for generating y values
         self.reweight = reweight
-        self.mask_endgaps = mask_endgaps 
+        self.mask_endgaps = mask_endgaps
 
     def __len__(self):
         return len(self.filenames)
@@ -529,10 +529,10 @@ class MSAGapDataset(Dataset):
     def __getitem__(self, idx):
         filename = self.filenames[idx]
         data = np.load(self.npz_dir + filename + '.npz')
-        
+
         # grab sequence info
         if self.msa_path is not None:
-            msa_data = np.load(self.msa_path + filename + ".npz") 
+            msa_data = np.load(self.msa_path + filename + ".npz")
             msa = msa_data['msa']
             weights = msa_data['weights']
         else:
@@ -544,7 +544,7 @@ class MSAGapDataset(Dataset):
             while flag:
                 random_idx = np.random.randint(0, len(msa))
                 base_seq = msa[random_idx]
-                if (base_seq == 20).sum()/len(base_seq) < 0.20:
+                if (base_seq == 20).sum() / len(base_seq) < 0.20:
                     flag = False
         else:
             base_seq = anchor_seq
@@ -555,14 +555,14 @@ class MSAGapDataset(Dataset):
             y = y_data['y']
             y_mask = y_data['y_mask']
         elif self.task == "gap-prob":
-            if self.reweight: # downsampling
-                y = ((msa == 20) * weights.T).sum(0)/msa.shape[0]
+            if self.reweight:  # downsampling
+                y = ((msa == 20) * weights.T).sum(0) / msa.shape[0]
                 y = torch.FloatTensor(y)
             else:
                 y = torch.FloatTensor(np.sum(msa == 20, axis=0) / msa.shape[0])
             y_mask = None
         else:  # lm
-#             y, y_mask = self._get_lm_y(msa)
+            #             y, y_mask = self._get_lm_y(msa)
             y = torch.LongTensor(base_seq)
             y_mask = None
         # choose X type
@@ -609,3 +609,335 @@ class MSAGapDataset(Dataset):
             y = torch.LongTensor(msa[np.random.choice(msa.shape[0])])  # get random seq from msa
             y_mask = None
             return y, y_mask
+
+
+class TRRMSADataset(Dataset):
+    """Build dataset for trRosetta data: MSA Absorbing Diffusion model"""
+
+    def __init__(self, selection_type, n_sequences, max_seq_len, data_dir=None):
+        """
+        Args:
+            selection_type: str,
+                MSA selection strategy of random or MaxHamming
+            n_sequences: int,
+                number of sequences to subsample down to
+            max_seq_len: int,
+                maximum MSA sequence length
+            data_dir: str,
+                if you have a specified npz directory
+        """
+
+        # Get npz_data dir
+        if data_dir is not None:
+            self.data_dir = data_dir
+        else:
+            raise FileNotFoundError(data_dir)
+
+        # MSAs should be in the order of npz_dir
+        all_files = os.listdir(self.data_dir)
+        if 'trrosetta_lengths.npz' in all_files:
+            all_files.remove('trrosetta_lengths.npz')
+        all_files = sorted(all_files)
+        self.filenames = all_files  # IDs of samples to include
+
+        # Number of sequences to subsample down to
+        self.n_sequences = n_sequences
+        self.max_seq_len = max_seq_len
+        self.selection_type = selection_type
+
+        alphabet = trR_ALPHABET + PAD
+        self.tokenizer = Tokenizer(alphabet)
+        self.alpha = np.array(list(alphabet))
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):  # TODO: add error checking?
+        filename = self.filenames[idx]
+        data = np.load(self.data_dir + filename)
+
+        # Grab sequence info
+        msa = data['msa']
+
+        msa_seq_len = len(msa[0])
+        if msa_seq_len > self.max_seq_len:
+            slice_start = np.random.choice(msa_seq_len - self.max_seq_len + 1)
+            seq_len = self.max_seq_len
+        else:
+            slice_start = 0
+            seq_len = msa_seq_len
+
+        sliced_msa = msa[:, slice_start: slice_start + self.max_seq_len]
+        anchor_seq = sliced_msa[0]  # This is the query sequence in MSA
+
+        sliced_msa = [list(seq) for seq in sliced_msa if (list(set(seq)) != [self.tokenizer.alphabet.index('-')])]
+        sliced_msa = np.asarray(sliced_msa)
+        msa_num_seqs = len(sliced_msa)
+
+        # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
+        # 'MaxHamming' selection strategy
+        if msa_num_seqs < self.n_sequences:
+            output = np.full(shape=(self.n_sequences, seq_len), fill_value=self.tokenizer.pad_id)
+            output[:msa_num_seqs] = sliced_msa
+        elif msa_num_seqs > self.n_sequences:
+            if self.selection_type == 'random':
+                random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
+                anchor_seq = np.expand_dims(anchor_seq, axis=0)
+                output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
+            elif self.selection_type == 'non-random':
+                output = sliced_msa[:64]
+            elif self.selection_type == "MaxHamming":
+                output = [list(anchor_seq)]
+                msa_subset = sliced_msa[1:]
+                msa_ind = np.arange(msa_num_seqs)[1:]
+                random_ind = np.random.choice(msa_ind)
+                random_seq = sliced_msa[random_ind]
+                output.append(list(random_seq))
+                random_seq = np.expand_dims(random_seq, axis=0)
+                msa_subset = np.delete(msa_subset, (random_ind - 1), axis=0)
+                m = len(msa_ind) - 1
+                distance_matrix = np.ones((self.n_sequences - 2, m))
+
+                for i in range(self.n_sequences - 2):
+                    curr_dist = cdist(random_seq, msa_subset, metric='hamming')
+                    curr_dist = np.expand_dims(np.array(curr_dist), axis=0)  # shape is now (1,msa_num_seqs)
+                    distance_matrix[i] = curr_dist
+                    col_min = np.min(distance_matrix, axis=0) # (1,num_choices)
+                    max_ind = np.argmax(col_min)
+                    random_ind = max_ind
+                    random_seq = msa_subset[random_ind]
+                    output.append(list(random_seq))
+                    random_seq = np.expand_dims(random_seq, axis=0)
+                    msa_subset = np.delete(msa_subset, random_ind, axis=0)
+                    distance_matrix = np.delete(distance_matrix, random_ind, axis=1)
+        else:
+            output = sliced_msa
+
+        output = [''.join(seq) for seq in self.alpha[output]]
+        return output
+
+
+class A3MMSADataset(Dataset):
+    """Build dataset for A3M data: MSA Absorbing Diffusion model"""
+
+    def __init__(self, selection_type, n_sequences, max_seq_len, data_dir=None):
+        """
+        Args:
+            selection_type: str,
+                MSA selection strategy of random or MaxHamming
+            n_sequences: int,
+                number of sequences to subsample down to
+            max_seq_len: int,
+                maximum MSA sequence length
+            data_dir: str,
+                if you have a specified data directory
+        """
+
+        # Get npz_data dir
+        if data_dir is not None:
+            self.data_dir = data_dir
+        else:
+            raise FileNotFoundError(data_dir)
+
+        all_files = os.listdir(self.data_dir)
+        if 'openfold_lengths.npz' in all_files:
+            all_files.remove('openfold_lengths.npz')
+        if 'trrosetta_test_lengths.npz' in all_files:
+            all_files.remove('trrosetta_test_lengths.npz')
+        all_files = sorted(all_files)
+        self.filenames = all_files  # IDs of samples to include
+
+        self.n_sequences = n_sequences
+        self.max_seq_len = max_seq_len
+        self.selection_type = selection_type
+        alphabet = PROTEIN_ALPHABET
+        self.tokenizer = Tokenizer(alphabet)
+        self.alpha = np.array(list(alphabet))
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):  # TODO: add error checking?
+        filename = self.filenames[idx]
+        if path.exists(self.data_dir + filename + '/a3m/uniclust30.a3m'):
+            parsed_msa = parse_fasta(self.data_dir + filename + '/a3m/uniclust30.a3m')
+        elif path.exists(self.data_dir + filename + '/a3m/bfd_uniclust_hits.a3m'):
+            parsed_msa = parse_fasta(self.data_dir + filename + '/a3m/bfd_uniclust_hits.a3m')
+        else:
+            parsed_msa = parse_fasta(self.data_dir + filename)
+            # print(filename)
+            # raise ValueError("file does not exist")
+
+        aligned_msa = [[char for char in seq if (char.isupper() or char == '-') and not char == '.'] for seq in parsed_msa]
+        aligned_msa = [''.join(seq) for seq in aligned_msa]
+
+        # with open('/home/t-nthakkar/msa_' + str(idx) + '.txt', 'a') as f:
+        #     for seq in aligned_msa:
+        #         f.write(seq)
+        #         f.write('\n')
+
+        tokenized_msa = [self.tokenizer.tokenize(seq) for seq in aligned_msa]
+        tokenized_msa = np.array([l.tolist() for l in tokenized_msa])
+
+        msa_seq_len = len(tokenized_msa[0])
+
+        if msa_seq_len > self.max_seq_len:
+            slice_start = np.random.choice(msa_seq_len - self.max_seq_len + 1)
+            seq_len = self.max_seq_len
+        else:
+            slice_start = 0
+            seq_len = msa_seq_len
+
+        sliced_msa = tokenized_msa[:, slice_start: slice_start + self.max_seq_len]
+        anchor_seq = sliced_msa[0]  # This is the query sequence in MSA
+
+        # gap_str = '-' * msa_seq_len
+        # parsed_msa = [seq.upper() for seq in parsed_msa if seq != gap_str]
+
+        sliced_msa = [seq for seq in sliced_msa if (list(set(seq)) != [self.tokenizer.alphabet.index('-')])]
+        msa_num_seqs = len(sliced_msa)
+
+        # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
+        # 'MaxHamming' selection strategy
+        if msa_num_seqs < self.n_sequences:
+            output = np.full(shape=(self.n_sequences, seq_len), fill_value=self.tokenizer.pad_id)
+            output[:msa_num_seqs] = sliced_msa
+        elif msa_num_seqs > self.n_sequences:
+            if self.selection_type == 'random':
+                random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
+                anchor_seq = np.expand_dims(anchor_seq, axis=0)
+                output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
+            elif self.selection_type == "MaxHamming":
+                output = [list(anchor_seq)]
+                msa_subset = sliced_msa[1:]
+                msa_ind = np.arange(msa_num_seqs)[1:]
+                random_ind = np.random.choice(msa_ind)
+                random_seq = sliced_msa[random_ind]
+                output.append(list(random_seq))
+                random_seq = np.expand_dims(random_seq, axis=0)
+                msa_subset = np.delete(msa_subset, (random_ind - 1), axis=0)
+                m = len(msa_ind) - 1
+                distance_matrix = np.ones((self.n_sequences - 2, m))
+
+                for i in range(self.n_sequences - 2):
+                    curr_dist = cdist(random_seq, msa_subset, metric='hamming')
+                    curr_dist = np.expand_dims(np.array(curr_dist), axis=0)  # shape is now (1,msa_num_seqs)
+                    distance_matrix[i] = curr_dist
+                    col_min = np.min(distance_matrix, axis=0)  # (1,num_choices)
+                    max_ind = np.argmax(col_min)
+                    random_ind = max_ind
+                    random_seq = msa_subset[random_ind]
+                    output.append(list(random_seq))
+                    random_seq = np.expand_dims(random_seq, axis=0)
+                    msa_subset = np.delete(msa_subset, random_ind, axis=0)
+                    distance_matrix = np.delete(distance_matrix, random_ind, axis=1)
+        else:
+            output = sliced_msa
+
+        output = [''.join(seq) for seq in self.alpha[output]]
+        return output
+
+
+class A2MZeroShotDataset(Dataset):
+    """Build dataset for A2M ProteinGym data: MSA Absorbing Diffusion model"""
+
+    def __init__(self, selection_type, n_sequences, data_dir=None):
+        """
+        Args:
+            selection_type: str,
+                MSA selection strategy of random or MaxHamming
+            n_sequences: int,
+                number of sequences to subsample down to
+            data_dir: str,
+                if you have a specified data directory
+        """
+
+        # Get npz_data dir
+        if data_dir is not None:
+            self.data_dir = data_dir
+        else:
+            raise FileNotFoundError(data_dir)
+
+        all_files = os.listdir(self.data_dir)
+        all_files = sorted(all_files)
+        self.filenames = all_files  # IDs of samples to include
+
+        self.n_sequences = n_sequences
+        self.selection_type = selection_type
+        alphabet = PROTEIN_ALPHABET
+        self.tokenizer = Tokenizer(alphabet)
+        self.alpha = np.array(list(alphabet))
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):
+        filename = self.filenames[idx]
+        print(filename)
+        parsed_msa = parse_fasta(self.data_dir + filename)
+
+        aligned_msa = [[char for char in seq if (char.isupper() or char == '-') and not char == '.'] for seq in parsed_msa]
+        aligned_msa = [''.join(seq) for seq in aligned_msa]
+
+        tokenized_msa = [self.tokenizer.tokenize(seq) for seq in aligned_msa]
+        tokenized_msa = np.array([l.tolist() for l in tokenized_msa])
+
+        msa_seq_len = len(tokenized_msa[0])
+        seq_len = msa_seq_len
+
+        # if msa_seq_len > self.max_seq_len:
+        #     slice_start = np.random.choice(msa_seq_len - self.max_seq_len + 1)
+        #     seq_len = self.max_seq_len
+        # else:
+        #     slice_start = 0
+        #     seq_len = msa_seq_len
+        #
+        # sliced_msa = tokenized_msa[:, slice_start: slice_start + self.max_seq_len]
+        sliced_msa = tokenized_msa
+        anchor_seq = sliced_msa[0]  # This is the query sequence in MSA
+
+        # gap_str = '-' * msa_seq_len
+        # parsed_msa = [seq.upper() for seq in parsed_msa if seq != gap_str]
+
+        sliced_msa = [seq for seq in sliced_msa if (list(set(seq)) != [self.tokenizer.alphabet.index('-')])]
+        msa_num_seqs = len(sliced_msa)
+
+        # If fewer sequences in MSA than self.n_sequences, create sequences padded with PAD token based on 'random' or
+        # 'MaxHamming' selection strategy
+        if msa_num_seqs < self.n_sequences:
+            output = np.full(shape=(self.n_sequences, seq_len), fill_value=self.tokenizer.pad_id)
+            output[:msa_num_seqs] = sliced_msa
+        elif msa_num_seqs > self.n_sequences:
+            if self.selection_type == 'random':
+                random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
+                anchor_seq = np.expand_dims(anchor_seq, axis=0)
+                output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
+            elif self.selection_type == "MaxHamming":
+                output = [list(anchor_seq)]
+                msa_subset = sliced_msa[1:]
+                msa_ind = np.arange(msa_num_seqs)[1:]
+                random_ind = np.random.choice(msa_ind)
+                random_seq = sliced_msa[random_ind]
+                output.append(list(random_seq))
+                random_seq = np.expand_dims(random_seq, axis=0)
+                msa_subset = np.delete(msa_subset, (random_ind - 1), axis=0)
+                m = len(msa_ind) - 1
+                distance_matrix = np.ones((self.n_sequences - 2, m))
+
+                for i in range(self.n_sequences - 2):
+                    curr_dist = cdist(random_seq, msa_subset, metric='hamming')
+                    curr_dist = np.expand_dims(np.array(curr_dist), axis=0)  # shape is now (1,msa_num_seqs)
+                    distance_matrix[i] = curr_dist
+                    col_min = np.min(distance_matrix, axis=0)  # (1,num_choices)
+                    max_ind = np.argmax(col_min)
+                    random_ind = max_ind
+                    random_seq = msa_subset[random_ind]
+                    output.append(list(random_seq))
+                    random_seq = np.expand_dims(random_seq, axis=0)
+                    msa_subset = np.delete(msa_subset, random_ind, axis=0)
+                    distance_matrix = np.delete(distance_matrix, random_ind, axis=1)
+        else:
+            output = sliced_msa
+
+        output = [''.join(seq) for seq in self.alpha[output]]
+        return output
