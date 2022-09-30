@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from sequence_models.utils import Tokenizer
-from sequence_models.constants import PAD, GAP, START, STOP, MASK
+from sequence_models.constants import PAD, GAP, START, STOP, MASK, MSA_PAD, PROTEIN_ALPHABET
 from sequence_models.constants import ALL_AAS
 from sequence_models.gnn import get_node_features, get_edge_features, get_mask, get_k_neighbors, replace_nan
 from sequence_models.trRosetta_utils import trRosettaPreprocessing
@@ -552,7 +552,7 @@ def _pad_msa(tokenized: List, num_seq: int, max_len: int, value: int) -> torch.T
     return output
 
 
-class MSAAbsorbingCollater():
+class MSAAbsorbingCollater(object):
     """Collater for MSA Absorbing Diffusion model.
     Based on implementation described by Hoogeboom et al. in "Autoregressive Diffusion Models"
     https://doi.org/10.48550/arXiv.2110.02037
@@ -572,10 +572,12 @@ class MSAAbsorbingCollater():
         mask (torch.LongTensor): 1 where tgt is not padding
     """
 
-    def __init__(self, alphabet: str, pad_token=PAD, num_seqs=64):
+    def __init__(self, alphabet: str, pad_token=MSA_PAD, num_seqs=64, bert=False):
         self.tokenizer = Tokenizer(alphabet)
         self.pad_idx = self.tokenizer.alphabet.index(pad_token)
         self.num_seqs = num_seqs
+        self.bert = bert
+        self.choices = [self.tokenizer.alphabet.index(a) for a in PROTEIN_ALPHABET + GAP]
 
     def __call__(self, batch_msa):
         tgt = list(batch_msa)
@@ -583,7 +585,8 @@ class MSAAbsorbingCollater():
 
         longest_msa = 0
         batch_size = len(batch_msa)
-
+        mask_ix = []
+        mask_iy = []
         for i in range(batch_size):
             # Tokenize MSA
             tgt[i] = [self.tokenizer.tokenize(s) for s in tgt[i]]
@@ -596,11 +599,24 @@ class MSAAbsorbingCollater():
 
             curr_msa = curr_msa.flatten()  # Flatten MSA to 1D to mask tokens
             d = len(curr_msa)  # number of residues in MSA
-            t = np.random.choice(d)  # Pick timestep t
-            t += 1  # ensure t cannot be 0
+            if not self.bert:
+                t = np.random.choice(d)  # Pick timestep t
+                t += 1  # ensure t cannot be 0
+                num_masked_tokens = d - t + 1
+                mask_idx = np.random.choice(d, num_masked_tokens, replace=False)
+            else:
+                num_corr_tokens = int(np.round(0.15 * d))
+                corr_idx = np.random.choice(d, num_corr_tokens, replace=False)
+                num_masked_tokens = int(np.round(0.8 * num_corr_tokens))
+                num_mut_tokens = int(np.round(0.1 * num_corr_tokens))
+                mask_idx = corr_idx[:num_masked_tokens]
+                muta_idx = corr_idx[-num_mut_tokens:]
+                for idx in muta_idx:
+                    choices = list(set(self.choices) - set(curr_msa[[idx]]))
+                    curr_msa[idx] = np.random.choice(choices)
+                mask_ix.append(corr_idx // depth)
+                mask_iy.append(corr_idx % depth)
 
-            num_masked_tokens = d - t + 1
-            mask_idx = np.random.choice(d, num_masked_tokens, replace=False)  # Pick D-t+1 random indices to mask
             curr_msa[mask_idx] = self.tokenizer.mask_id
             curr_msa = curr_msa.reshape(length, depth)
 
@@ -611,7 +627,12 @@ class MSAAbsorbingCollater():
         # Pad sequences
         src = _pad_msa(src, self.num_seqs, longest_msa, self.pad_idx)
         tgt = _pad_msa(tgt, self.num_seqs, longest_msa, self.pad_idx)
-
-        mask = (src == self.tokenizer.mask_id)
+        if self.bert:
+            mask = torch.zeros_like(src)
+            for i in range(len(mask_ix)):
+                mask[i, mask_ix[i], mask_iy[i]] = 1
+            mask = mask.bool()
+        else:
+            mask = (src == self.tokenizer.mask_id)
 
         return src, tgt, mask
