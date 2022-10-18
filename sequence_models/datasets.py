@@ -16,7 +16,7 @@ import pandas as pd
 
 from sequence_models.utils import Tokenizer, parse_fasta
 from sequence_models.constants import trR_ALPHABET, DIST_BINS, PHI_BINS, THETA_BINS, OMEGA_BINS, STOP, PAD, \
-    PROTEIN_ALPHABET
+    MSA_ALPHABET
 from sequence_models.gnn import bins_to_vals
 from sequence_models.pdb_utils import process_coords
 
@@ -750,7 +750,7 @@ class A3MMSADataset(Dataset):
         self.n_sequences = n_sequences
         self.max_seq_len = max_seq_len
         self.selection_type = selection_type
-        alphabet = PROTEIN_ALPHABET
+        alphabet = MSA_ALPHABET
         self.tokenizer = Tokenizer(alphabet)
         self.alpha = np.array(list(alphabet))
 
@@ -864,7 +864,7 @@ class A2MZeroShotDataset(Dataset):
 
         self.n_sequences = n_sequences
         self.selection_type = selection_type
-        alphabet = PROTEIN_ALPHABET
+        alphabet = MSA_ALPHABET
         self.tokenizer = Tokenizer(alphabet)
         self.alpha = np.array(list(alphabet))
 
