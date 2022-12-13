@@ -1,10 +1,29 @@
 import torch.nn as nn
+import torch
+import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
-from esm.modules import TransformerLayer, LearnedPositionalEmbedding, RobertaLMHead, ESM1bLayerNorm, \
-    AxialTransformerLayer
+from esm.modules import TransformerLayer, LearnedPositionalEmbedding, ESM1bLayerNorm, AxialTransformerLayer
 from sequence_models.constants import PROTEIN_ALPHABET, PAD, MASK
 
+
+class RobertaLMHead(nn.Module):
+    """Head for masked language modeling."""
+
+    def __init__(self, embed_dim, output_dim, weight):
+        super().__init__()
+        self.dense = nn.Linear(embed_dim, embed_dim)
+        self.layer_norm = ESM1bLayerNorm(embed_dim)
+        self.weight = weight
+        self.bias = nn.Parameter(torch.zeros(output_dim))
+
+    def forward(self, features):
+        x = self.dense(features)
+        x = F.gelu(x)
+        x = self.layer_norm(x)
+        # project back to size of vocabulary with bias
+        x = F.linear(x, self.weight) + self.bias
+        return x
 
 class ESM1b(nn.Module):
     """
