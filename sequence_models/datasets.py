@@ -806,7 +806,7 @@ class A3MMSADataset(Dataset):
             if self.selection_type == 'random':
                 random_idx = np.random.choice(msa_num_seqs - 1, size=self.n_sequences - 1, replace=False) + 1
                 anchor_seq = np.expand_dims(anchor_seq, axis=0)
-                output = np.concatenate((anchor_seq, sliced_msa[random_idx]), axis=0)
+                output = np.concatenate((anchor_seq, np.array(sliced_msa)[random_idx.astype(int)]), axis=0)
             elif self.selection_type == "MaxHamming":
                 output = [list(anchor_seq)]
                 msa_subset = sliced_msa[1:]
