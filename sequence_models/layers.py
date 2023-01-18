@@ -91,10 +91,10 @@ class PositionFeedForward2d(nn.Module):
 
     def __init__(self, d_in, d_out):
         super().__init__()
-        self.conv = nn.Conv2d(d_in, d_out, 1)
+        self.dense = nn.Linear(d_in, d_out)
 
     def forward(self, x):
-        return self.conv(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        return self.dense(x)
 
 
 class MaskedInstanceNorm2d(nn.InstanceNorm2d):

@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 import numpy as np
 
 
@@ -70,7 +71,7 @@ class MaskedConv2d(nn.Conv2d):
     def forward(self, x, input_mask=None):
         if input_mask is not None:
             x = x * input_mask
-        return super().forward(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        return super().forward(x.permute(0, 3, 1, 2).contiguous()).permute(0, 2, 3, 1).contiguous()
 
 
 class MaskedCausalConv1d(nn.Module):
@@ -419,14 +420,14 @@ class ByteNetBlock2d(nn.Module):
         self.conv = MaskedConv2d(d_h, d_h, kernel_size=kernel_size, dilation=dilation, groups=groups)
         layers1 = [
             nn.LayerNorm(d_in),
-            nn.ReLU(),
+            nn.GELU(),
             PositionFeedForward2d(d_in, d_h),
             nn.LayerNorm(d_h),
-            nn.ReLU()
+            nn.GELU()
         ]
         layers2 = [
             nn.LayerNorm(d_h),
-            nn.ReLU(),
+            nn.GELU(),
             PositionFeedForward2d(d_h, d_out),
         ]
         self.sequence1 = nn.Sequential(*layers1)
@@ -453,7 +454,7 @@ class ByteNet2d(nn.Module):
 
     """
 
-    def __init__(self, d_in, d_model, n_layers, kernel_size, r, dropout=0.0):
+    def __init__(self, d_in, d_model, d_hidden, n_layers, kernel_size, r, dropout=0.0, tokens=True, padding_idx=None):
         """
         :param d_in: number of input dimensions
         :param d_model: dimension to use within ByteNet model, // 2 every layer
@@ -462,11 +463,14 @@ class ByteNet2d(nn.Module):
         :param r: used to calculate dilation factor
         """
         super().__init__()
-        self.up_embedder = PositionFeedForward2d(d_in, d_model)
+        if tokens:
+            self.up_embedder = nn.Embedding(d_in, d_model, padding_idx=padding_idx)
+        else:
+            self.up_embedder = PositionFeedForward2d(d_in, d_model)
         log2 = int(np.log2(r)) + 1
         dilations = [2 ** (n % log2) for n in range(n_layers)]
         layers = [
-            ByteNetBlock2d(d_model, d_model // 2, d_model, kernel_size, dilation=d)
+            ByteNetBlock2d(d_model, d_hidden, d_model, kernel_size, dilation=d)
             for d in dilations
         ]
         self.layers = nn.ModuleList(modules=layers)
@@ -482,10 +486,28 @@ class ByteNet2d(nn.Module):
 
     def _convolve(self, e, input_mask=None):
         for layer in self.layers:
-            e = layer(e, input_mask=input_mask)
+            e = checkpoint(layer, e, input_mask)
+
+            # e = layer(e, input_mask=input_mask)
             if self.dropout > 0.0:
                 e = F.dropout(e, self.dropout)
         return e
 
+
+class ByteNetLM2d(nn.Module):
+
+    def __init__(self, n_tokens, d_model, d_hidden, n_layers, kernel_size, r,
+                 padding_idx=None, dropout=0.0):
+        super().__init__()
+        self.embedder = ByteNet2d(n_tokens, d_model, d_hidden, n_layers, kernel_size, r,
+                                padding_idx=padding_idx, dropout=dropout, tokens=True)
+
+        self.decoder = PositionFeedForward2d(d_model, n_tokens)
+        self.last_norm = nn.LayerNorm(d_model)
+
+    def forward(self, x, input_mask=None):
+        e = self.embedder(x, input_mask=input_mask)
+        e = self.last_norm(e)
+        return self.decoder(e)
 
 
