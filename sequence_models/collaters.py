@@ -76,11 +76,13 @@ class SimpleCollater(object):
     Output (torch.LongTensor): tokenized batch of sequences
     """
 
-    def __init__(self, alphabet: str, pad=False, backwards=False, pad_token=PAD):
+    def __init__(self, alphabet: str, pad=False, backwards=False, pad_token=PAD, start=False, stop=False):
         self.pad = pad
         self.tokenizer = Tokenizer(alphabet)
         self.backwards = backwards
         self.pad_idx = self.tokenizer.alphabet.index(pad_token)
+        self.start = start
+        self.stop = stop
 
     def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
@@ -89,6 +91,10 @@ class SimpleCollater(object):
         return prepped
 
     def _prep(self, sequences):
+        if self.start:
+            sequences = [START + s for s in sequences]
+        if self.stop:
+            sequences = [s + STOP for s in sequences]
         if self.backwards:
             sequences = [s[::-1] for s in sequences]
         sequences = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in sequences]
@@ -109,8 +115,8 @@ class TAPECollater(SimpleCollater):
     For contacts, this pads the contacts on the bottom and right.
     """
 
-    def __init__(self, alphabet: str, pad=True):
-        super().__init__(alphabet, pad=pad)
+    def __init__(self, alphabet: str, pad=True, start=False, stop=False):
+        super().__init__(alphabet, pad=pad, start=start, stop=stop)
 
     def __call__(self, batch: List[Any], ) -> List[torch.Tensor]:
         data = tuple(zip(*batch))
@@ -228,9 +234,10 @@ class MLMCollater(SimpleCollater):
         mask (torch.LongTensor): 1 where loss should be calculated for tgt
     """
 
-    def __init__(self, alphabet: str, pad=False, backwards=False, pad_token=PAD, mut_alphabet=ALL_AAS):
+    def __init__(self, alphabet: str, pad=False, backwards=False, pad_token=PAD, mut_alphabet=ALL_AAS, startstop=False):
         super().__init__(alphabet, pad=pad, backwards=backwards, pad_token=pad_token)
         self.mut_alphabet=mut_alphabet
+        self.startstop = startstop
 
     def _prep(self, sequences):
         tgt = list(sequences[:])
@@ -257,6 +264,10 @@ class MLMCollater(SimpleCollater):
             m = torch.zeros(len(seq_mod))
             m[mod_idx] = 1
             mask.append(m)
+        if self.startstop:
+            src = [START + s + STOP for s in src]
+            tgt = [START + s + STOP for s in tgt]
+            mask = [torch.cat([torch.zeros(1), m, torch.zeros(1)]) for m in mask]
         src = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in src]
         tgt = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in tgt]
         pad_idx = self.tokenizer.alphabet.index(PAD)
@@ -520,8 +531,8 @@ class MSAGapCollater(object):
 class Seq2PropertyCollater(SimpleCollater):
     """A collater that batches sequences and a 1d target. """
 
-    def __init__(self, alphabet: str, pad=True, scatter=False, return_mask=False):
-        super().__init__(alphabet, pad=pad)
+    def __init__(self, alphabet: str, pad=True, scatter=False, return_mask=False, start=False, stop=False):
+        super().__init__(alphabet, pad=pad, start=start, stop=stop)
         self.scatter = scatter
         self.mask = return_mask
 
