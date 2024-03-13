@@ -556,10 +556,11 @@ class Seq2PropertyCollater(SimpleCollater):
 def _pad_msa(tokenized: List, num_seq: int, max_len: int, value: int) -> torch.Tensor:
     """Utility function that pads batches to the same length."""
     batch_size = len(tokenized)
+    num_seq = max([len(m) for m in tokenized])
     output = torch.zeros((batch_size, num_seq, max_len), dtype=torch.long) + value
     for i in range(batch_size):
         tokenized[i] = torch.LongTensor(np.array(tokenized[i]))
-        output[i, :, :len(tokenized[i][0])] = tokenized[i]
+        output[i, :len(tokenized[i]), :len(tokenized[i][0])] = tokenized[i]
     return output
 
 
@@ -588,7 +589,8 @@ class MSAAbsorbingCollater(object):
         self.pad_idx = self.tokenizer.alphabet.index(pad_token)
         self.num_seqs = num_seqs
         self.bert = bert
-        self.choices = [self.tokenizer.alphabet.index(a) for a in PROTEIN_ALPHABET + GAP]
+        if bert:
+            self.choices = [self.tokenizer.alphabet.index(a) for a in PROTEIN_ALPHABET + GAP]
 
     def __call__(self, batch_msa):
         tgt = list(batch_msa)
