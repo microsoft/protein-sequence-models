@@ -58,7 +58,8 @@ class ApproxBatchSampler(BatchSampler):
 		List of lengths of sequences in the order of the dataset
 	"""
 
-    def __init__(self, sampler, max_tokens, max_batch, sample_lengths, max_square_tokens=np.inf, msa_depth=None):
+    def __init__(self, sampler, max_tokens, max_batch, sample_lengths, max_square_tokens=np.inf,
+                 msa_depth=None, batch_mult=1):
         self.longest_token = 0
         self.max_tokens = max_tokens
         self.max_batch = max_batch
@@ -66,6 +67,7 @@ class ApproxBatchSampler(BatchSampler):
         self.sample_lengths = sample_lengths
         self.max_square_tokens = max_square_tokens
         self.msa_depth = msa_depth
+        self.batch_mult = batch_mult
 
     def __iter__(self):
         batch = []
@@ -88,8 +90,10 @@ class ApproxBatchSampler(BatchSampler):
                     batch = []
                     length = 0
             else:
-                yield batch
-                batch = [idx]
+                rounded_n = (len(batch) // self.batch_mult) * self.batch_mult
+                rounded_n = max(1, rounded_n)
+                yield batch[:rounded_n]
+                batch = batch[rounded_n:] + [idx]
                 length = this_length
                 ell_sq = this_length ** 2
         if len(batch) > 0:
