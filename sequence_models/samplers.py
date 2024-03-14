@@ -94,7 +94,7 @@ class ApproxBatchSampler(BatchSampler):
                 rounded_n = max(1, rounded_n)
                 yield batch[:rounded_n]
                 batch = batch[rounded_n:] + [idx]
-                length = this_length
-                ell_sq = this_length ** 2
+                length = max([self.sample_lengths[i] for i in batch])
+                ell_sq = length ** 2
         if len(batch) > 0:
             yield batch
