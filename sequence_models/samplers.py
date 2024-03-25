@@ -20,7 +20,6 @@ class SortishSampler(Sampler):
         self.total_size = self.num_samples * self.num_replicas
 
     def __iter__(self):
-        np.random.seed(self.epoch)
         for bucket in self.data:
             np.random.shuffle(bucket)
         np.random.shuffle(self.data)
@@ -39,6 +38,34 @@ class SortishSampler(Sampler):
 
     def set_epoch(self, epoch):
         self.epoch = epoch
+        np.random.seed(self.epoch)
+
+
+class ClusteredSortishSampler(SortishSampler):
+    """Samples from clusters, then yields indices such that inputs with similar lengths are close together."""
+
+    def __init__(self, sequence_lengths: Iterable, clusters: Iterable,
+                 bucket_size: int, num_replicas: int = 1, rank: int = 0):
+        self.num_replicas = num_replicas
+        self.clusters = np.array(clusters)
+        self.cluster_sizes = np.array([len(c) for c in self.clusters])
+        self.num_samples = int(math.ceil(len(self.clusters) * 1.0 / self.num_replicas))
+        self.bucket_size = bucket_size
+        self.n_buckets = int(np.ceil(len(self.clusters) / self.bucket_size))
+        self.lengths = sequence_lengths
+        self.rank = rank
+        self.total_size = self.num_samples * self.num_replicas
+        self.all_data = np.argsort(sequence_lengths)
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+        np.random.seed(self.epoch)
+        selected = np.random.randint(self.cluster_sizes)
+        selected_indices = [c[s] for c, s in zip(self.clusters, selected)]
+        self.data = self.all_data[np.isin(self.all_data, selected_indices, assume_unique=True)]
+        self.data = [self.data[i * self.bucket_size: i * self.bucket_size + self.bucket_size] for i in
+                     range(self.n_buckets)]
+
 
 
 class ApproxBatchSampler(BatchSampler):
