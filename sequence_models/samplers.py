@@ -47,7 +47,7 @@ class ClusteredSortishSampler(SortishSampler):
     def __init__(self, sequence_lengths: Iterable, clusters: Iterable,
                  bucket_size: int, num_replicas: int = 1, rank: int = 0):
         self.num_replicas = num_replicas
-        self.clusters = np.array(clusters)
+        self.clusters = clusters
         self.cluster_sizes = np.array([len(c) for c in self.clusters])
         self.num_samples = int(math.ceil(len(self.clusters) * 1.0 / self.num_replicas))
         self.bucket_size = bucket_size
