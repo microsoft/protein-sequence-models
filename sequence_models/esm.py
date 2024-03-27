@@ -166,7 +166,7 @@ class MSATransformer(nn.Module):
         x = x.permute(1, 2, 0, 3)
 
         for layer_idx, layer in enumerate(self.layers):
-            x = checkpoint(layer, x, None, padding_mask, False)
+            x = checkpoint(layer, x, None, padding_mask, False, use_reentrant=True)
 
         x = self.emb_layer_norm_after(x)
         x = x.permute(2, 0, 1, 3)  # R x C x B x D -> B x R x C x D
