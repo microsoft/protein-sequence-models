@@ -161,9 +161,11 @@ class LMCollater(SimpleCollater):
         mask (torch.LongTensor): 1 where tgt is not padding
     """
 
-    def __init__(self, alphabet: str, pad=False, backwards=False):
+    def __init__(self, alphabet: str, pad=False, backwards=False, pad_token=PAD):
         super().__init__(alphabet, pad=pad)
         self.backwards = backwards
+        self.pad_idx = self.tokenizer.alphabet.index(pad_token)
+
 
     def _prep(self, sequences):
         return self._tokenize_and_mask(*self._split(sequences))
@@ -181,9 +183,8 @@ class LMCollater(SimpleCollater):
         src = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in src]
         tgt = [torch.LongTensor(self.tokenizer.tokenize(s)) for s in tgt]
         mask = [torch.ones_like(t) for t in tgt]
-        pad_idx = self.tokenizer.alphabet.index(PAD)
-        src = _pad(src, pad_idx)
-        tgt = _pad(tgt, pad_idx)
+        src = _pad(src, self.pad_idx)
+        tgt = _pad(tgt, self.pad_idx)
         mask = _pad(mask, 0)
         return src, tgt, mask
 
